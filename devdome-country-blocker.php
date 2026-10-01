@@ -3,7 +3,7 @@
 Plugin Name: DevDome Country Blocker
 Plugin URI: https://devdome.com/
 Description: Block or allow website visitors by country. Works with Cloudflare out of the box or with a free local IP database. No account, no external calls at runtime, nothing sent anywhere.
-Version: 1.0.3
+Version: 1.0.4
 Author: DevDome
 Author URI: https://devdome.com
 Text Domain: devdome-country-blocker
@@ -23,7 +23,7 @@ if (file_exists(__DIR__ . '/wporg-build.php')) {
     require __DIR__ . '/wporg-build.php';
 }
 
-define('DEVDCOUN_VERSION', '1.0.3');
+define('DEVDCOUN_VERSION', '1.0.4');
 define('DEVDCOUN_DIR', plugin_dir_path(__FILE__));
 define('DEVDCOUN_URL', plugin_dir_url(__FILE__));
 define('DEVDCOUN_FILE', __FILE__);

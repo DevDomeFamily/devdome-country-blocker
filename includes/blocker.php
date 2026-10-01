@@ -171,7 +171,7 @@ function devdcoun_respond($cc)
     status_header(403);
     $msg = $s['message'] !== '' ? $s['message'] : __('Sorry, this website is not available in your region.', 'devdome-country-blocker');
     header('Content-Type: text/html; charset=utf-8');
-    echo devdcoun_block_page_html($msg); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built escaped in devdcoun_block_page_html()
+    devdcoun_print_block_page($msg);
     exit;
 }
 
@@ -180,13 +180,15 @@ function devdcoun_respond($cc)
  * flex centring over the full viewport height (100dvh where supported, 100vh before), padding so it never touches the
  * edges, long words wrap.
  */
-function devdcoun_block_page_html($msg)
+function devdcoun_print_block_page($msg)
 {
     // Styles ride on the elements themselves (no <style> or <script> block anywhere in PHP, Affiliate Manager T1).
-    return '<!DOCTYPE html><html style="height:100%"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">'
+    echo '<!DOCTYPE html><html style="height:100%"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">'
         . '<title>403</title>'
         . '</head><body style="height:100%;margin:0;min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f8f9fa;color:#3c4043;-webkit-text-size-adjust:100%;text-size-adjust:100%">'
-        . '<main style="width:100%;max-width:480px;text-align:center;overflow-wrap:anywhere"><h1 style="font-size:42px;line-height:1.1;margin:0 0 10px;color:#9aa0a6">403</h1><p style="font-size:15px;line-height:1.6;margin:0">' . esc_html($msg) . '</p></main></body></html>';
+        . '<main style="width:100%;max-width:480px;text-align:center;overflow-wrap:anywhere"><h1 style="font-size:42px;line-height:1.1;margin:0 0 10px;color:#9aa0a6">403</h1><p style="font-size:15px;line-height:1.6;margin:0">';
+    echo esc_html($msg);
+    echo '</p></main></body></html>';
 }
 
 /**

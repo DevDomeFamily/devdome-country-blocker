@@ -1,18 +1,22 @@
-=== DevDome Country Blocker ===
+=== DevDome Country Blocker: Geo Blocking, GeoIP Block ===
 Contributors: devdome
-Tags: country blocker, geo blocking, block countries, geoip, ip blocker
+Tags: country blocker, geo blocking, geo blocker, geoip block, whitelist country
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.3
+Stable tag: 1.0.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Block visitors by country or allow only listed countries. Use Cloudflare or a free local IP database. Test your list before blocking.
+Use geo blocking to block or allow countries, with Cloudflare or a free local GeoIP database and Test Mode to check your rules.
 
 == Description ==
 
-DevDome Country Blocker blocks visitors from listed countries or allows only listed countries, subject to your safety exemptions. Blocked visitors get a 403 page with your text or a redirect to another website.
+DevDome Country Blocker is a geo blocker for WordPress with country block and allow lists. Block visitors by country or allow only listed countries, subject to your safety exemptions. Blocked visitors get a 403 page with your text or a redirect to another website.
+
+Geo blocking uses verified Cloudflare country headers or the free local DB-IP country database for GeoIP detection. The local database supports IPv4 and IPv6, with automatic monthly refresh. Country detection runs on your server without external lookup requests during visits.
+
+Before you geoblock visitors, use Test Mode to let everyone through and log requests that would be blocked. You can restrict by country while keeping individual IPv4 and IPv6 addresses or CIDR ranges exempt through Always Allowed Addresses. wp-admin is never blocked, and visitors whose country is unknown are always allowed.
 
 = How It Knows the Country =
 
@@ -174,6 +178,12 @@ Deleting the plugin removes its statistics tables, settings, cached summary, dat
 4. The 403 page: a plain page displaying your message to blocked visitors.
 
 == Changelog ==
+
+= 1.0.4 =
+
+* Listing text updated: title, short description, tags and introduction.
+* The admin page is printed without an output buffer and the Report this error button goes through wp_kses.
+* Shared DevDome library 1.7.10: the one-time Report a bug hint is recorded through a nonce-checked request instead of on a page view, and the DevDome dashboard prints its icons through wp_kses.
 
 = 1.0.3 =
 * Removed the shared library update helper. The plugin no longer hooks the WordPress updater; updates come only from WordPress.org.

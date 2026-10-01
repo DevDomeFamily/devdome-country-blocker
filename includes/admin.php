@@ -396,10 +396,9 @@ function devdcoun_render_page()
     if (!isset($tabs[$tab])) {
         $tab = 'overview';
     }
-    // The page is built inside a guard window and buffered (DESIGN.md 24): a query that failed while it was
-    // built gets a red banner on top instead of a screen that quietly shows defaults.
+    // The page is built inside a guard window (DESIGN.md 24): a query that failed while it was built gets a red
+    // banner, printed after the page and lifted to its top by dc-admin.js, instead of a screen that quietly shows defaults.
     devdcoun_db_guard_begin();
-    ob_start();
     $s   = devdcoun_settings();
     $sum = devdcoun_summary();
     // The tiles read a cached summary (daily cron). Opening the screen refreshes it when it is older than five minutes,
@@ -460,7 +459,7 @@ function devdcoun_render_page()
             </div>
         </div>
         <?php if ('' !== $err_text) : ?>
-            <div class="dd-banner" data-dc-flash="1" style="margin:16px 24px 0;border-color:#fecaca;background:#fef2f2;color:#991b1b;"><?php echo esc_html($err_text); ?><?php if (function_exists('devdcorev1_error_report_button')) { echo devdcorev1_error_report_button('devdome-country-blocker', DEVDCOUN_VERSION, ('db' === $err ? 'Database error during a Country Blocker action: ' : 'Country Blocker action did not land: ') . $err_text, 'Country Blocker ' . $tab); } // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped by the core helper ?></div>
+            <div class="dd-banner" data-dc-flash="1" style="margin:16px 24px 0;border-color:#fecaca;background:#fef2f2;color:#991b1b;"><?php echo esc_html($err_text); ?><?php if (function_exists('devdcorev1_error_report_button')) { echo wp_kses(devdcorev1_error_report_button('devdome-country-blocker', DEVDCOUN_VERSION, ('db' === $err ? 'Database error during a Country Blocker action: ' : 'Country Blocker action did not land: ') . $err_text, 'Country Blocker ' . $tab), devdcoun_report_kses()); } ?></div>
         <?php endif; ?>
         <main>
             <?php foreach (array('overview' => 'devdcoun_render_overview_tab', 'settings' => 'devdcoun_render_settings_tab') as $slug => $renderer) : $active = ($tab === $slug); ?>
@@ -475,15 +474,25 @@ function devdcoun_render_page()
         <?php endif; ?>
     </div>
     <?php
-    $html = (string) ob_get_clean();
-    if (devdcoun_db_guard_failed()) {
+    if (devdcoun_db_guard_failed()) :
         $banner_text = __('A database query failed while this page was built, so what it shows may be incomplete or stale. Reload the page; if it keeps happening, check the database with your host.', 'devdome-country-blocker');
         $report_btn  = function_exists('devdcorev1_error_report_button') ? devdcorev1_error_report_button('devdome-country-blocker', DEVDCOUN_VERSION, 'Country Blocker page built over a failed database query: ' . devdcoun_redact(devdcoun_db_guard_error()), 'Country Blocker page') : '';
-        $banner      = '<div class="dd-banner" style="margin:16px 24px 0;border-color:#fecaca;background:#fef2f2;color:#991b1b;">' . esc_html($banner_text) . $report_btn . '</div>';
-        $html        = preg_replace_callback('/(<div class="dd-app[^>]*>)/', function ($m) use ($banner) { return $m[1] . $banner; }, $html, 1);
-    }
+        ?>
+        <div class="dd-banner" id="devdcoun-guard-banner" style="margin:16px 24px 0;border-color:#fecaca;background:#fef2f2;color:#991b1b;"><?php echo esc_html($banner_text); ?><?php echo wp_kses($report_btn, devdcoun_report_kses()); ?></div>
+    <?php endif; ?>
+    <?php
     devdcoun_db_guard_end();
-    echo $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- the buffered page, escaped where built
+}
+
+/** Tags the shared core's Report this error button is made of (wp_kses allowlist). */
+function devdcoun_report_kses()
+{
+    return array(
+        'span'   => array('class' => true),
+        'button' => array('type' => true, 'class' => true, 'data-ddc-report' => true),
+        'svg'    => array('viewbox' => true, 'fill' => true, 'stroke' => true, 'stroke-width' => true, 'stroke-linecap' => true, 'stroke-linejoin' => true, 'aria-hidden' => true),
+        'path'   => array('d' => true),
+    );
 }
 
 /* ----------------------------- overview tab ----------------------------- */
@@ -690,7 +699,7 @@ function devdcoun_render_settings_tab($s, $sum)
         <?php if ('ok' === $db) : ?>
             <div class="dd-banner" data-dc-flash="1" style="border-color:#a7f3d0;background:#ecfdf5;color:#065f46;margin-bottom:16px;" role="status"><?php echo esc_html('' !== $why ? $why : __('Database ready.', 'devdome-country-blocker')); ?></div>
         <?php elseif ('fail' === $db) : ?>
-            <div class="dd-banner" data-dc-flash="1" style="border-color:#fecaca;background:#fef2f2;color:#991b1b;margin-bottom:16px;" role="alert"><?php echo esc_html('' !== $why ? $why : __('The database could not be built.', 'devdome-country-blocker')); ?><?php if (function_exists('devdcorev1_error_report_button')) { echo devdcorev1_error_report_button('devdome-country-blocker', DEVDCOUN_VERSION, 'Database download failed: ' . $why, 'Country Blocker settings'); } // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped by the core helper ?></div>
+            <div class="dd-banner" data-dc-flash="1" style="border-color:#fecaca;background:#fef2f2;color:#991b1b;margin-bottom:16px;" role="alert"><?php echo esc_html('' !== $why ? $why : __('The database could not be built.', 'devdome-country-blocker')); ?><?php if (function_exists('devdcorev1_error_report_button')) { echo wp_kses(devdcorev1_error_report_button('devdome-country-blocker', DEVDCOUN_VERSION, 'Database download failed: ' . $why, 'Country Blocker settings'), devdcoun_report_kses()); } ?></div>
         <?php endif; ?>
 
         <?php // Owner 2026-09-15: the database looks after itself (monthly refresh). The section shows only when it needs the owner: not installed yet, or the last download failed. ?>
@@ -711,7 +720,7 @@ function devdcoun_render_settings_tab($s, $sum)
             <?php if (!empty($meta['last_error'])) : ?>
                 <p class="dd-hint" style="color:#b91c1c;margin:0 0 12px;"><?php
                 /* translators: %s is the error text of the last database download attempt. */
-                echo esc_html(sprintf(__('Last attempt failed: %s', 'devdome-country-blocker'), (string) $meta['last_error'])); ?><?php if (function_exists('devdcorev1_error_report_button')) { echo devdcorev1_error_report_button('devdome-country-blocker', DEVDCOUN_VERSION, 'Database download failed: ' . (string) $meta['last_error'], 'Country Blocker settings'); } // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped by the core helper ?></p>
+                echo esc_html(sprintf(__('Last attempt failed: %s', 'devdome-country-blocker'), (string) $meta['last_error'])); ?><?php if (function_exists('devdcorev1_error_report_button')) { echo wp_kses(devdcorev1_error_report_button('devdome-country-blocker', DEVDCOUN_VERSION, 'Database download failed: ' . (string) $meta['last_error'], 'Country Blocker settings'), devdcoun_report_kses()); } ?></p>
             <?php endif; ?>
             <form method="post" style="margin:0;">
                 <input type="hidden" name="devdcoun_db_build" value="1">

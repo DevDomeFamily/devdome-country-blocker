@@ -509,7 +509,11 @@ function devdcorev1_hub_render_default()
 
     $can_deactivate = current_user_can('activate_plugins');
 
-    // Reusable inline SVGs.
+    // Reusable inline SVGs, printed through wp_kses() with this allow-list.
+    $ic_kses   = array(
+        'svg'  => array('viewbox' => true, 'fill' => true, 'stroke' => true, 'stroke-width' => true, 'stroke-linecap' => true, 'stroke-linejoin' => true),
+        'path' => array('d' => true),
+    );
     $ic_arrow  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
     $ic_update = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>';
     $ic_power  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>';
@@ -572,7 +576,7 @@ function devdcorev1_hub_render_default()
                     <span class="ddh-ci">DD</span>
                     <div class="ddh-cbody">
                         <strong>Connect this site to your DevDome account</strong>
-                        <span>Connecting is optional and nothing is sent to DevDome until you press Connect. By pressing Connect you agree that this site sends DevDome its domain and site token, the slug and version of each active DevDome plugin, and the DevDome library, WordPress and PHP versions. This is sent with the recurring account status checks to api.devdome.com, so your DevDome account can show your sites and their DevDome plugins for email alerts, support and update notices. It applies to all DevDome plugins on this site. Nothing about other plugins, users, email addresses, content or visitors is sent. Disconnecting stops it, and every plugin works without connecting. <a href="https://devdome.com/privacy-policy" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">Privacy Policy</a> &middot; <a href="https://devdome.com/terms-of-service" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">Terms of Service</a></span>
+                        <span>Connect sends your domain, site token, active DevDome plugins and their versions, and the DevDome library, WordPress and PHP versions to api.devdome.com with the recurring account checks. Nothing about users, content or visitors. See each plugin&rsquo;s readme, External services, for details. <a href="https://devdome.com/privacy-policy" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">Privacy Policy</a> &middot; <a href="https://devdome.com/terms-of-service" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">Terms of Service</a></span>
                     </div>
                     <div class="ddh-cctl">
                         <div class="ddh-cpanel">
@@ -612,7 +616,7 @@ function devdcorev1_hub_render_default()
             <div class="ddh-sec"><h3>Active plugins</h3><span class="ddh-count"><?php echo (int) $active_n; ?></span>
                 <?php if ($update_n > 0) :
                     $upd_all = wp_nonce_url(self_admin_url('update-core.php'), ''); ?>
-                    <a class="ddh-btn ddh-btn-ghost ddh-btn-sm ddh-updall" data-dd-updall="1" href="<?php echo esc_url(self_admin_url('update-core.php')); ?>"><?php echo $ic_update; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>Update all (<?php echo (int) $update_n; ?>)</a>
+                    <a class="ddh-btn ddh-btn-ghost ddh-btn-sm ddh-updall" data-dd-updall="1" href="<?php echo esc_url(self_admin_url('update-core.php')); ?>"><?php echo wp_kses($ic_update, $ic_kses); ?>Update all (<?php echo (int) $update_n; ?>)</a>
                 <?php endif; ?>
             </div>
             <?php if (empty($active)) : ?>
@@ -631,21 +635,19 @@ function devdcorev1_hub_render_default()
                         <span class="ddh-logo"><?php echo wp_kses(devdcorev1_hub_logo_svg($r['slug']), devdcorev1_hub_svg_kses()); ?></span>
                         <div class="ddh-rid"><div class="ddh-rmain"><div class="ddh-rline">
                             <div class="ddh-rname"><?php echo esc_html(strpos($r['name'], 'DevDome') === 0 ? $r['name'] : 'DevDome ' . $r['name']); ?></div>
-                            <div class="ddh-rver">v<?php echo esc_html($r['version'] ? $r['version'] : '1.0'); ?><?php if ($new_ver !== '') : ?> <span class="ddh-up">&rarr; v<?php echo esc_html($new_ver); ?></span><?php if ($upd_url) : ?><a class="ddh-upbtn" href="<?php echo esc_url($upd_url); ?>" data-dd-plugin="<?php echo esc_attr($pf); ?>" data-dd-ver="<?php echo esc_attr($new_ver); ?>" data-dd-nonce="<?php echo esc_attr(wp_create_nonce('updates')); ?>" onclick="event.stopPropagation()"><?php echo $ic_update; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>Update</a><?php endif; ?><?php endif; ?></div>
+                            <div class="ddh-rver">v<?php echo esc_html($r['version'] ? $r['version'] : '1.0'); ?><?php if ($new_ver !== '') : ?> <span class="ddh-up">&rarr; v<?php echo esc_html($new_ver); ?></span><?php if ($upd_url) : ?><a class="ddh-upbtn" href="<?php echo esc_url($upd_url); ?>" data-dd-plugin="<?php echo esc_attr($pf); ?>" data-dd-ver="<?php echo esc_attr($new_ver); ?>" data-dd-nonce="<?php echo esc_attr(wp_create_nonce('updates')); ?>" onclick="event.stopPropagation()"><?php echo wp_kses($ic_update, $ic_kses); ?>Update</a><?php endif; ?><?php endif; ?></div>
                         </div><?php if (!empty($r['desc'])) : ?><div class="ddh-rsub"><?php echo esc_html(wp_strip_all_tags($r['desc'])); ?></div><?php endif; ?></div></div>
                         <?php if ($has) : ?>
-                            <span class="ddh-st warn"><span class="dot"></span><?php echo (int) count($r_issues); ?> Issue<?php echo esc_html(count($r_issues) === 1 ? '' : 's'); ?><span class="caret"><?php echo $ic_caret; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span></span>
-                        <?php elseif (!empty($r['health']) && is_callable($r['health'])) : ?>
-                            <span class="ddh-st ok"><?php echo $ic_check; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>No Issues</span>
+                            <span class="ddh-st warn"><span class="dot"></span><?php echo (int) count($r_issues); ?> Issue<?php echo esc_html(count($r_issues) === 1 ? '' : 's'); ?><span class="caret"><?php echo wp_kses($ic_caret, $ic_kses); ?></span></span>
                         <?php else : ?>
-                            <span class="ddh-st ok" title="This plugin does not report health checks to the dashboard yet.">Not monitored</span><?php // no health callback = no clean bill (DeepSeek core round 1) ?>
+                            <span class="ddh-st ok"><?php echo wp_kses($ic_check, $ic_kses); ?>No Issues</span><?php // every clean row says No Issues; the registry row never carried a health key, so the old elseif never fired (owner 2026-09-30) ?>
                         <?php endif; ?>
                         <?php if (!empty($r['get_url'])) : ?><a class="ddh-btn ddh-btn-ghost ddh-docs" href="<?php echo esc_url($r['get_url']); ?>" target="_blank" rel="noopener" onclick="event.stopPropagation()">Docs</a><?php endif; ?>
-                        <?php if ($open_url) : ?><a class="ddh-btn ddh-btn-ghost" href="<?php echo esc_url($open_url); ?>" onclick="event.stopPropagation()">Open <?php echo $ic_arrow; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></a><?php endif; ?>
+                        <?php if ($open_url) : ?><a class="ddh-btn ddh-btn-ghost" href="<?php echo esc_url($open_url); ?>" onclick="event.stopPropagation()">Open <?php echo wp_kses($ic_arrow, $ic_kses); ?></a><?php endif; ?>
                     <?php if ($has) : ?></summary><div class="ddh-drop">
                         <?php foreach ($r_issues as $iss) : ?>
                             <?php $fix_url = !empty($iss['href']) ? (string) $iss['href'] : $open_url; ?>
-                            <div class="ddh-iss"><div class="ddh-iss-txt"><b><?php echo esc_html(isset($iss['problem']) ? $iss['problem'] : 'Needs attention'); ?></b><?php if (!empty($iss['fix'])) : ?><span><?php echo esc_html($iss['fix']); ?></span><?php elseif (!empty($iss['why_it_matters'])) : ?><span><?php echo esc_html($iss['why_it_matters']); ?></span><?php endif; ?></div><?php if ($fix_url) : ?><a class="ddh-btn ddh-btn-solid ddh-btn-sm ddh-fix" href="<?php echo esc_url($fix_url); ?>">Fix <?php echo $ic_arrow; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></a><?php endif; ?></div>
+                            <div class="ddh-iss"><div class="ddh-iss-txt"><b><?php echo esc_html(isset($iss['problem']) ? $iss['problem'] : 'Needs attention'); ?></b><?php if (!empty($iss['fix'])) : ?><span><?php echo esc_html($iss['fix']); ?></span><?php elseif (!empty($iss['why_it_matters'])) : ?><span><?php echo esc_html($iss['why_it_matters']); ?></span><?php endif; ?></div><?php if ($fix_url) : ?><a class="ddh-btn ddh-btn-solid ddh-btn-sm ddh-fix" href="<?php echo esc_url($fix_url); ?>">Fix <?php echo wp_kses($ic_arrow, $ic_kses); ?></a><?php endif; ?></div>
                         <?php endforeach; ?>
                     </div></details><?php else : ?></div></div><?php endif; ?>
                 <?php endforeach; ?>
@@ -665,7 +667,7 @@ function devdcorev1_hub_render_default()
                             <div class="ddh-rid"><div class="ddh-rmain"><div class="ddh-rline"><div class="ddh-rname"><?php echo esc_html(strpos($r['name'], 'DevDome') === 0 ? $r['name'] : 'DevDome ' . $r['name']); ?></div><?php if ($r['version']) : ?><div class="ddh-rver">v<?php echo esc_html($r['version']); ?></div><?php endif; ?></div><?php if (!empty($r['desc'])) : ?><div class="ddh-rsub"><?php echo esc_html(wp_strip_all_tags($r['desc'])); ?></div><?php endif; ?></div></div>
                             <span class="ddh-st off"><span class="odot"></span>Inactive</span>
                             <?php if (!empty($r['get_url'])) : ?><a class="ddh-btn ddh-btn-ghost ddh-docs" href="<?php echo esc_url($r['get_url']); ?>" target="_blank" rel="noopener" onclick="event.stopPropagation()">Docs</a><?php endif; ?>
-                            <?php if ($act_url) : ?><a class="ddh-btn ddh-btn-solid" href="<?php echo esc_url($act_url); ?>"><?php echo $ic_power; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>Activate</a><?php endif; ?>
+                            <?php if ($act_url) : ?><a class="ddh-btn ddh-btn-solid" href="<?php echo esc_url($act_url); ?>"><?php echo wp_kses($ic_power, $ic_kses); ?>Activate</a><?php endif; ?>
                         </div></div>
                     <?php endforeach; ?>
                 </div>
@@ -685,7 +687,7 @@ function devdcorev1_hub_render_default()
                             if (function_exists('devdcorev1_hub_install_actions')) {
                                 echo wp_kses_post(devdcorev1_hub_install_actions($r));
                             } else { ?>
-                                <a class="ddh-btn ddh-btn-solid" href="<?php echo esc_url($r['get_url']); ?>" target="_blank" rel="noopener"><?php echo $ic_dl; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>Get it</a>
+                                <a class="ddh-btn ddh-btn-solid" href="<?php echo esc_url($r['get_url']); ?>" target="_blank" rel="noopener"><?php echo wp_kses($ic_dl, $ic_kses); ?>Get it</a>
                             <?php } ?>
                         </div></div>
                     <?php endforeach; ?>

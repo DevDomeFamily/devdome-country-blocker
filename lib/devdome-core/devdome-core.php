@@ -20,7 +20,7 @@ if (defined('DEVDCOREV1_LOADED')) {
     return; // a higher/equal version already loaded the library
 }
 define('DEVDCOREV1_LOADED', true);
-define('DEVDCOREV1_VERSION', '1.7.6');
+define('DEVDCOREV1_VERSION', '1.7.10');
 
 if (!defined('DEVDCOREV1_FEED_ENDPOINT')) {
     define('DEVDCOREV1_FEED_ENDPOINT', 'https://api.devdome.com/bot-protection');
@@ -297,7 +297,10 @@ if (!function_exists('devdcorev1_get_feeds')) {
     /** Client IP for the beacon (Cloudflare-aware). */
     function devdcorev1_request_ip()
     {
-        foreach (array('HTTP_CF_CONNECTING_IP', 'REMOTE_ADDR') as $h) {
+        // CF-Connecting-IP is believed only when a plugin vouches that the peer is Cloudflare (the bot-protection
+        // plugin checks REMOTE_ADDR against the published ranges); otherwise anyone could name a victim address.
+        $trust_cf = (bool) apply_filters('devdcorev1_trust_cf_ip', false);
+        foreach ($trust_cf ? array('HTTP_CF_CONNECTING_IP', 'REMOTE_ADDR') : array('REMOTE_ADDR') as $h) {
             if (!empty($_SERVER[$h])) {
                 // FILTER_VALIDATE_IP is the real sanitizer here: anything that is not a literal
                 // IP is discarded. sanitize_text_field() runs first so the read is unambiguous.
@@ -497,9 +500,8 @@ if (!function_exists('devdcorev1_get_feeds')) {
     require_once __DIR__ . '/hub-report.php';
     require_once __DIR__ . '/hub-error-report.php'; // "Report this error" button + admin-ajax sender, core 1.7.0
     require_once __DIR__ . '/abilities.php'; // devdome-tools/get-connection (WP 6.9+ Abilities API), core 1.7.0
-    // Absent from the WordPress.org build (.wporg-strip): wp.org reviewers refuse any filter on the core upgrader
-    // (review R devdome-country-blocker/27Sep26), and wp.org installs are never root-owned. Self-hosted builds keep it.
-    if (file_exists(__DIR__ . '/hub-update-heal.php')) {
+    require_once __DIR__ . '/hub-bug-hint.php'; // one-time "Report a bug" bubble, once per user across the suite
+    if (file_exists(__DIR__ . '/hub-update-heal.php')) { // self-hosted builds only: wp.org strips it (review 27 Sep 2026, no hooks on the updater)
         require_once __DIR__ . '/hub-update-heal.php'; // updates work on root-owned plugin folders, core 1.7.2
     }
     // Absent from the WordPress.org build (.wporg-strip): a wp.org-distributed

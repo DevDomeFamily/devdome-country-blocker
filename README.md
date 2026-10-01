@@ -1,4 +1,4 @@
-# DevDome Country Blocker
+# DevDome Country Blocker: Geo Blocking, GeoIP Block
 
 Free WordPress plugin: block or allow visitors by country, with an allow list, a test mode and stats.
 

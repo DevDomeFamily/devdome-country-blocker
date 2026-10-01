@@ -12,6 +12,9 @@
 	'use strict';
 
 	var app = document.querySelector('.dd-app');
+	// DESIGN.md 24: the "a database query failed" banner is printed after the page; it belongs at its top.
+	var guardBanner = document.getElementById('devdcoun-guard-banner');
+	if (app && guardBanner) { app.insertBefore(guardBanner, app.firstChild); }
 	if (!app) { return; }
 
 	/* ------------------------------ tabs + flash ------------------------------ */
