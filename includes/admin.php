@@ -433,9 +433,10 @@ function devdcoun_render_page()
     $source_ok   = devdcoun_source_available();
     ?>
     <div class="dd-app min-h-screen bg-gray-50 text-[#3c434a] font-sans text-[13px]">
+        <?php if (function_exists('devdcorev1_analytics_card')) { devdcorev1_analytics_card(); } ?>
         <div class="bg-white border-b border-gray-200 shadow-sm">
             <div class="max-w-5xl px-6 py-4 flex items-center gap-3">
-                <div class="p-1.5 rounded text-white inline-flex" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);"><span class="dashicons dashicons-admin-site-alt3"></span></div>
+                <div class="p-1.5 rounded text-white inline-flex" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);"><?php echo wp_kses(devdcoun_icon_svg(), devdcoun_icon_kses()); ?></div>
                 <h1 class="text-xl font-bold text-gray-800 m-0"><?php esc_html_e('Country Blocker', 'devdome-country-blocker'); ?></h1>
                 <div style="margin-left:auto;display:flex;align-items:center;gap:10px;">
                     <?php if ($active_mode && $source_ok && !empty($s['test_mode'])) : ?>
@@ -482,6 +483,23 @@ function devdcoun_render_page()
     <?php endif; ?>
     <?php
     devdcoun_db_guard_end();
+}
+
+/** The plugin mark: a globe with a padlock (lucide globe-lock), the same mark as the wp.org icon. */
+function devdcoun_icon_svg($size = 20)
+{
+    $size = (int) $size;
+    return '<svg width="' . $size . '" height="' . $size . '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.686 15A14.5 14.5 0 0 1 12 22a14.5 14.5 0 0 1 0-20 10 10 0 1 0 9.542 13"/><path d="M2 12h8.5"/><path d="M20 6V4a2 2 0 1 0-4 0v2"/><rect width="8" height="5" x="14" y="6" rx="1"/></svg>';
+}
+
+/** Tags the plugin mark is made of (wp_kses allowlist). */
+function devdcoun_icon_kses()
+{
+    return array(
+        'svg'  => array('width' => true, 'height' => true, 'viewbox' => true, 'fill' => true, 'stroke' => true, 'stroke-width' => true, 'stroke-linecap' => true, 'stroke-linejoin' => true, 'aria-hidden' => true),
+        'path' => array('d' => true),
+        'rect' => array('x' => true, 'y' => true, 'width' => true, 'height' => true, 'rx' => true),
+    );
 }
 
 /** Tags the shared core's Report this error button is made of (wp_kses allowlist). */

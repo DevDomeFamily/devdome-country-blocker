@@ -41,9 +41,15 @@ if (!function_exists('devdcorev1_uninstall_cleanup')) {
         delete_option('devdcorev1_connect_started');
         delete_option('devdcorev1_inventory_consent');
         delete_option('devdcorev1_connection_gen');
+        // Core audit 2026-10-16: the Analytics mention card dismissal (1.7.13), the update-heal records
+        // (1.7.2) and the per-user "Report a bug" bubble flag (1.7.0) were never swept.
+        delete_option('devdcorev1_an_card_dismissed');
+        delete_option('devdcorev1_heal_leftovers');
+        delete_option('devdcorev1_heal_untracked');
+        delete_metadata('user', 0, 'devdcorev1_bug_hint_seen', '', true);
         // The connection itself (core 1.6.1): identifiers, the site token, the cached account
         // and connection state, and every short-lived connect/beacon transient.
-        foreach (array('devdcorev1_site_id', 'devdcorev1_site_token', 'devdcorev1_account_id', 'devdcorev1_account_email', 'devdcorev1_account', 'devdcorev1_conn_state', 'devdcorev1_conn_checked', 'devdcorev1_hub_catalog') as $opt) {
+        foreach (array('devdcorev1_telemetry', 'devdcorev1_telemetry_salt', 'devdcorev1_site_id', 'devdcorev1_site_token', 'devdcorev1_account_id', 'devdcorev1_account_email', 'devdcorev1_account', 'devdcorev1_conn_state', 'devdcorev1_conn_checked', 'devdcorev1_hub_catalog') as $opt) {
             delete_option($opt);
         }
         global $wpdb;

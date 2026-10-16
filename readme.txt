@@ -4,7 +4,7 @@ Tags: country blocker, geo blocking, geo blocker, geoip block, whitelist country
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.4
+Stable tag: 1.0.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -179,6 +179,14 @@ Deleting the plugin removes its statistics tables, settings, cached summary, dat
 
 == Changelog ==
 
+= 1.0.5 =
+
+* A dismissible note at the top of the settings page mentions the free DevDome Analytics plugin, with a button that opens the plugin installer (or the Analytics screen when it is already active). Dismiss hides it for good.
+* Shared DevDome library 1.7.13: uninstalling the last DevDome plugin also removes the note's dismissal, the update-repair records and the per-user "Report a bug" flag; the visitor-beacon flood guard keeps one short-lived record per address and clears its expired ones itself, and behind Cloudflare it counts per visitor instead of per Cloudflare address.
+* Shared DevDome library 1.7.12: a Cloudflare visitor address header is trusted only when the connection itself comes from a Cloudflare address, so a forged header from anywhere else is ignored.
+* Shared DevDome library 1.7.11: on a subdirectory multisite, a site mapped to its own domain is its own site and no longer shares the network's connection.
+* Deleting the plugin also removes the cached update-check answer it kept in the database.
+
 = 1.0.4 =
 
 * Listing text updated: title, short description, tags and introduction.
@@ -199,3 +207,11 @@ Plugin name and plugin links corrected.
 = 1.0.0 =
 
 First release. Includes country block and allow lists, verified Cloudflare headers, a local IPv4 and IPv6 database with monthly refresh, trusted proxies, a custom 403 message or redirect, Test Mode, access safeguards, optional login and XML-RPC blocking, statistics, an anonymized hit log, 8 WordPress Abilities and the shared DevDome core 1.7.6 (DevDome Tools dashboard, optional account connection, Report this error).
+
+== Upgrade Notice ==
+
+= 1.0.5 =
+Housekeeping release. Blocking and the screen are unchanged.
+
+= 1.0.4 =
+New listing text and WordPress.org review fixes. Blocking rules are unaffected.

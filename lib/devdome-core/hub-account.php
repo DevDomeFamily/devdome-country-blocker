@@ -14,16 +14,24 @@ defined('ABSPATH') || exit;
  * the network's host, so every blog shares ONE token and ONE site id: reads and writes of the two
  * identity options are routed to the main site through option filters, which covers every
  * plugin's own get_option() calls without touching them. Subdomain multisite blogs keep their own
- * host and their own identity. Connection state stays per blog: each blog presses Connect once
- * and the server treats it as the same site. Core 1.7.0.
+ * host and their own identity, and so does a subdirectory blog mapped to its own domain (core 1.7.11).
+ * Connection state stays per blog: each blog presses Connect once and the server treats it as the
+ * same site. Core 1.7.0.
  */
 if (!function_exists('devdcorev1_shared_identity')) {
     function devdcorev1_shared_identity()
     {
-        // Three cheap calls, evaluated each time: switch_to_blog() can change the answer within one request.
-        return function_exists('is_multisite') && is_multisite()
+        // Cheap calls, evaluated each time: switch_to_blog() can change the answer within one request.
+        if (!(function_exists('is_multisite') && is_multisite()
             && function_exists('is_subdomain_install') && !is_subdomain_install()
-            && function_exists('is_main_site') && !is_main_site();
+            && function_exists('is_main_site') && !is_main_site())) {
+            return false;
+        }
+        // Core 1.7.11: identity = the DOMAIN, so a subsite MAPPED to its own domain is its own site. It shares
+        // the network's token + Site ID only while its host is still the network's host (Codex, Analytics 1.1.5).
+        $blog_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+        $net_host  = function_exists('network_home_url') ? strtolower((string) wp_parse_url(network_home_url('/'), PHP_URL_HOST)) : '';
+        return '' !== $blog_host && $blog_host === $net_host;
     }
     /** pre_option_<identity option>: the main site's value, read once per request. */
     function devdcorev1_identity_read($pre, $option, $reset = null)

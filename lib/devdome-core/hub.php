@@ -453,6 +453,78 @@ function devdcorev1_hub_render_overview()
 }
 
 /** Core's registry-driven Overview (the default v1 hub). */
+/* ------------------------- Analytics mention card (core 1.7.13) ------------------------- */
+// One dismissible card on a plugin's OWN settings page pointing at the free DevDome Analytics
+// plugin on WordPress.org (a plugin mention, not an upsell: guideline 11 allows linking our own
+// products on our own screens). Links only to wp-admin's plugin-install screen; never installs
+// or activates anything itself. Hidden for good once dismissed. Plugins call
+// devdcorev1_analytics_card() at the top of their settings page.
+function devdcorev1_analytics_card_dismiss()
+{
+    if (empty($_GET['devdcorev1_an_card_dismiss']) || !current_user_can('manage_options')) {
+        return;
+    }
+    check_admin_referer('devdcorev1_an_card');
+    update_option('devdcorev1_an_card_dismissed', 1, false);
+    wp_safe_redirect(remove_query_arg(array('devdcorev1_an_card_dismiss', '_wpnonce')));
+    exit;
+}
+add_action('admin_init', 'devdcorev1_analytics_card_dismiss');
+
+function devdcorev1_analytics_card()
+{
+    if (!current_user_can('manage_options') || get_option('devdcorev1_an_card_dismissed', 0)) {
+        return;
+    }
+    // Read from the options, not is_plugin_active(): that helper lives in the admin-only plugin helpers file, which the
+    // bundled library never loads itself (wp.org review rule, kept by the suite tests).
+    $an_file = 'devdome-analytics/devdome-analytics.php';
+    $active  = in_array($an_file, (array) get_option('active_plugins', array()), true)
+        || (is_multisite() && array_key_exists($an_file, (array) get_site_option('active_sitewide_plugins', array())));
+    if ($active) {
+        $btn_url = add_query_arg(array('page' => 'devdome-analytics'), admin_url('admin.php'));
+        $btn_txt = 'Open Analytics';
+    } elseif (current_user_can('install_plugins')) {
+        // The search results page, not tab=plugin-information: that page is the popup's iframe body and
+        // opened directly it has no admin menu, no admin bar and no way back (core audit 2026-10-16).
+        $btn_url = add_query_arg(array('s' => 'devdome-analytics', 'tab' => 'search', 'type' => 'term'), admin_url('plugin-install.php'));
+        $btn_txt = 'Install Analytics';
+    } else {
+        $btn_url = 'https://wordpress.org/plugins/devdome-analytics/';
+        $btn_txt = 'View On WordPress.org';
+    }
+    $dismiss = wp_nonce_url(add_query_arg('devdcorev1_an_card_dismiss', 1), 'devdcorev1_an_card');
+    $tools   = add_query_arg(array('page' => DEVDCOREV1_TOOLS_MENU_SLUG), admin_url('admin.php'));
+    ?>
+    <style>
+    .ddan-card{display:flex;align-items:center;gap:16px;margin:16px 24px 0;padding:14px 18px;background:#0b1224;color:#fff;border-radius:12px;position:relative;max-width:1000px;box-sizing:border-box}
+    .ddan-ic{flex:0 0 42px;width:42px;height:42px;border-radius:10px;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;letter-spacing:-.5px}
+    .ddan-body{flex:1 1 auto;min-width:0}
+    .ddan-body strong{display:block;font-size:15px;line-height:1.3;margin:0 0 3px;color:#fff;font-weight:800}
+    .ddan-body span{display:block;font-size:13px;line-height:1.45;color:#fff;font-weight:600}
+    .ddan-body .ddan-key{margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.18)}
+    .ddan-body a{color:#c7d2fe;text-decoration:underline;font-weight:700}
+    .ddan-body a:hover{text-decoration:underline}
+    .ddan-btn{flex:0 0 auto;background:#4f46e5;color:#fff;font-weight:700;font-size:13px;padding:9px 16px;border-radius:9px;text-decoration:none;white-space:nowrap}
+    .ddan-btn:hover,.ddan-btn:focus{background:#4338ca;color:#fff}
+    .ddan-x{position:absolute;top:6px;right:10px;color:#c7d2fe;text-decoration:none;font-size:18px;line-height:1}
+    .ddan-x:hover{color:#fff}
+    @media (max-width:782px){.ddan-card{flex-wrap:wrap;margin:12px 10px 0}.ddan-btn{width:100%;text-align:center}}
+    </style>
+    <div class="ddan-card">
+        <span class="ddan-ic">DD</span>
+        <div class="ddan-body">
+            <strong>See your real visitors, not the bots. Free up to 50,000 pageviews a month.</strong>
+            <span>DevDome Analytics shows how many real people visit your site and how many hits are bots, with no cookies.</span>
+            <span>More DevDome plugins block bad bots, remove malware, clean unused media, find broken links, manage redirects and affiliate links, tidy the admin and log what users do. <a href="<?php echo esc_url($tools); ?>">See all plugins</a></span>
+            <span class="ddan-key">One DevDome account is the key to everything: connect it once and every plugin gets its dashboard and email alerts.</span>
+        </div>
+        <a class="ddan-btn" href="<?php echo esc_url($btn_url); ?>"><?php echo esc_html($btn_txt); ?></a>
+        <a class="ddan-x" href="<?php echo esc_url($dismiss); ?>" title="Dismiss" aria-label="Dismiss">&times;</a>
+    </div>
+    <?php
+}
+
 function devdcorev1_hub_render_default()
 {
     if (!current_user_can('manage_options')) {

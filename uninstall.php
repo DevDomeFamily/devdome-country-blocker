@@ -43,6 +43,13 @@ function devdcoun_uninstall_site()
 // stored per site, so a network uninstall visits every site. It removes shared data only when this is the LAST
 // DevDome plugin installed.
 require_once __DIR__ . '/lib/devdome-core/uninstall.php';
+// The suite updater caches its update manifest under a hashed key, per site and (on multisite) network wide.
+// Clear both spellings, or the cache outlives the plugin.
+$devdcoun_updater_cache = 'devdome_upd_' . md5('devdome-country-blocker');
+delete_transient($devdcoun_updater_cache);
+if (is_multisite()) {
+    delete_site_transient($devdcoun_updater_cache);
+}
 if (is_multisite()) {
     $devdcoun_offset = 0;
     do {
