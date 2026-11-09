@@ -82,7 +82,9 @@ function devdcoun_page_css()
         .dd-app .dc-bug-btn svg { width:16px; height:16px; }
         .dd-app .dc-bug-btn:focus { outline:none; box-shadow:none; }
         .dd-app .dc-intro { font-size:13px; color:#6b7280; margin:0 0 14px; max-width:66%; } /* DESIGN.md 22.2 */
-        .dd-app .dd-stat-sub { font-size:11px; color:#9ca3af; margin-top:2px; }
+        /* DESIGN.md 32: hero number tiles, ONE size in every plugin (Backup & Migration 1.0.1 = the reference, owner 5 Nov 2026). */
+        .dd-app .dd-stats { gap:16px; } .dd-app .dd-stats .dd-stat { padding:14px 12px; } .dd-app .dd-stats .dd-stat-num { font-size:24px; line-height:24px; font-weight:700; }
+        .dd-app .dd-stats .dd-stat-lbl { font-size:12px; line-height:16px; margin-top:6px; color:#374151; } .dd-app .dd-stats .dd-stat-sub { font-size:11px; line-height:1.5; margin-top:2px; color:#374151; }
         .dd-app .dc-stats-4 { grid-template-columns:repeat(4,minmax(0,1fr)); }
         .dd-app .dc-refresh { display:flex; align-items:center; justify-content:flex-end; gap:10px; margin:10px 0 24px; }
         .dd-app .dc-refresh .dd-hint { margin:0; }
@@ -268,6 +270,18 @@ function devdcoun_handle_save()
     if (isset($_POST['cb_trusted_proxies']) && is_string($_POST['cb_trusted_proxies'])) {
         $proxies = preg_split('/[\r\n]+/', sanitize_textarea_field(wp_unslash($_POST['cb_trusted_proxies'])));
     }
+    $deny = array();
+    if (isset($_POST['cb_ip_denylist']) && is_string($_POST['cb_ip_denylist'])) {
+        $deny = preg_split('/[\r\n]+/', sanitize_textarea_field(wp_unslash($_POST['cb_ip_denylist'])));
+    }
+    $asns = array();
+    if (isset($_POST['cb_block_asns']) && is_string($_POST['cb_block_asns'])) {
+        $asns = preg_split('/[\s,;]+/', sanitize_textarea_field(wp_unslash($_POST['cb_block_asns'])));
+    }
+    // The Cloudflare token: an empty field keeps the saved one, the word CLEAR removes it, anything else replaces it.
+    $cur_token = devdcoun_setting('cf_token', '');
+    $tok_in    = isset($_POST['cb_cf_token']) && is_string($_POST['cb_cf_token']) ? trim(sanitize_text_field(wp_unslash($_POST['cb_cf_token']))) : '';
+    $cf_token  = '' === $tok_in ? $cur_token : ('CLEAR' === strtoupper($tok_in) ? '' : $tok_in);
     $input = array(
         'mode'           => isset($_POST['cb_mode']) && is_string($_POST['cb_mode']) ? sanitize_key(wp_unslash($_POST['cb_mode'])) : 'off',
         'block_countries' => $lists['block_countries'],
@@ -281,8 +295,14 @@ function devdcoun_handle_save()
         'test_mode'      => !empty($_POST['cb_test_mode']),
         'protect_login'  => !empty($_POST['cb_protect_login']),
         'protect_xmlrpc' => !empty($_POST['cb_protect_xmlrpc']),
+        'protect_rest'   => !empty($_POST['cb_protect_rest']),
+        'protect_ajax'   => !empty($_POST['cb_protect_ajax']),
         'ip_allowlist'   => is_array($allow) ? $allow : array(),
         'trusted_proxies' => is_array($proxies) ? $proxies : array(),
+        'ip_denylist'    => is_array($deny) ? $deny : array(),
+        'block_asns'     => is_array($asns) ? $asns : array(),
+        'block_datacenter' => !empty($_POST['cb_block_datacenter']),
+        'cf_token'       => $cf_token,
     );
     $clean = devdcoun_sanitize_settings($input);
     // Allow-only with no country would let everyone in while the screen says the opposite: refused, nothing saved.
@@ -294,14 +314,22 @@ function devdcoun_handle_save()
     if (devdcoun_would_lock_out($clean)) {
         devdcoun_finish(array('page' => DEVDCOUN_PAGE, 'cb_tab' => 'settings', 'cb_error' => 'lockout'));
     }
+    $was_dc = (int) devdcoun_setting('block_datacenter', 0);
     $saved = devdcoun_save_settings($input);
     if ($saved) {
         devdcoun_refresh_summary();
+        $now_dc = (int) devdcoun_setting('block_datacenter', 0);
+        if ($now_dc !== $was_dc) {
+            devdcoun_dc_asns_schedule((bool) $now_dc);
+        }
+        if ($now_dc && !devdcoun_dc_asns()) {
+            devdcoun_dc_asns_refresh(); // first download right away, so the switch works from this save on
+        }
     }
     $done = array('page' => DEVDCOUN_PAGE, 'cb_tab' => 'settings', 'cb_saved' => '1');
     // What the validation did not keep is said on the screen, never dropped silently.
     $dropped = 0;
-    foreach (array('ip_allowlist', 'trusted_proxies') as $list_key) {
+    foreach (array('ip_allowlist', 'trusted_proxies', 'ip_denylist') as $list_key) {
         $lines    = array_filter(array_map('trim', $input[$list_key]), 'strlen');
         $dropped += count($lines) - count(array_filter($lines, 'devdcoun_valid_allowlist_entry'));
     }
@@ -310,6 +338,9 @@ function devdcoun_handle_save()
     }
     if ('' !== trim((string) $input['redirect_url']) && '' === $clean['redirect_url']) {
         $done['cb_url'] = '1';
+    }
+    if ('' !== $tok_in && 'CLEAR' !== strtoupper($tok_in) && '' === $clean['cf_token']) {
+        $done['cb_cftoken'] = '1';
     }
     devdcoun_finish($saved ? $done : array('page' => DEVDCOUN_PAGE, 'cb_tab' => 'settings', 'cb_error' => 'save'));
 }
@@ -330,6 +361,36 @@ function devdcoun_handle_db_build()
     devdcoun_finish(array('page' => DEVDCOUN_PAGE, 'cb_tab' => 'settings', 'cb_db' => $ok ? 'ok' : 'fail', 'cb_why' => substr((string) $msg, 0, 200)));
 }
 add_action('admin_init', 'devdcoun_handle_db_build');
+/** Push to Cloudflare (PRG). The result travels as flags; the Settings tab shows it once. */
+function devdcoun_handle_cf_push()
+{
+    if (empty($_POST['devdcoun_cf_push'])) {
+        return;
+    }
+    if (!current_user_can(devdcoun_capability())) {
+        wp_die(esc_html__('You do not have permission to do this.', 'devdome-country-blocker'));
+    }
+    check_admin_referer('devdcoun_cf_push', '_dccf');
+    devdcoun_db_guard_begin();
+    list($ok, $msg) = devdcoun_cf_push();
+    devdcoun_finish(array('page' => DEVDCOUN_PAGE, 'cb_tab' => 'settings', 'cb_cf' => $ok ? 'ok' : 'fail', 'cb_why' => substr((string) $msg, 0, 200)));
+}
+add_action('admin_init', 'devdcoun_handle_cf_push');
+/** Remove from Cloudflare (PRG), same nonce field as the push button (one form). */
+function devdcoun_handle_cf_remove()
+{
+    if (empty($_POST['devdcoun_cf_remove'])) {
+        return;
+    }
+    if (!current_user_can(devdcoun_capability())) {
+        wp_die(esc_html__('You do not have permission to do this.', 'devdome-country-blocker'));
+    }
+    check_admin_referer('devdcoun_cf_push', '_dccf');
+    devdcoun_db_guard_begin();
+    list($ok, $msg) = devdcoun_cf_remove();
+    devdcoun_finish(array('page' => DEVDCOUN_PAGE, 'cb_tab' => 'settings', 'cb_cf' => $ok ? 'ok' : 'fail', 'cb_why' => substr((string) $msg, 0, 200)));
+}
+add_action('admin_init', 'devdcoun_handle_cf_remove');
 
 /** Clear Statistics: typed-word CLEAR (DESIGN.md 23), the server checks the word too. */
 function devdcoun_handle_clear_stats()
@@ -700,6 +761,8 @@ function devdcoun_render_settings_tab($s, $sum)
     $why   = isset($_GET['cb_why']) && is_string($_GET['cb_why']) ? sanitize_text_field(wp_unslash($_GET['cb_why'])) : '';
     $dropped = isset($_GET['cb_dropped']) && is_string($_GET['cb_dropped']) ? absint(wp_unslash($_GET['cb_dropped'])) : 0;
     $bad_url = isset($_GET['cb_url']);
+    $cf      = isset($_GET['cb_cf']) && is_string($_GET['cb_cf']) ? sanitize_key(wp_unslash($_GET['cb_cf'])) : '';
+    $bad_tok = isset($_GET['cb_cftoken']);
     // phpcs:enable WordPress.Security.NonceVerification.Recommended
     ?>
     <div class="max-w-5xl px-6 pt-3 pb-6">
@@ -707,12 +770,20 @@ function devdcoun_render_settings_tab($s, $sum)
             <div class="dd-banner" data-dc-flash="1" style="border-color:#fde68a;background:#fffbeb;color:#92400e;margin-bottom:16px;" role="status">
                 <?php
                 /* translators: %d is the number of address lines that were not kept. */
-                printf(esc_html(_n('%d line in Always Allowed Addresses or Trusted Proxies was not a valid address or range and was not saved.', '%d lines in Always Allowed Addresses or Trusted Proxies were not valid addresses or ranges and were not saved.', $dropped, 'devdome-country-blocker')), (int) $dropped);
+                printf(esc_html(_n('%d line in Always Allowed Addresses, Always Blocked Addresses or Trusted Proxies was not a valid address or range and was not saved.', '%d lines in Always Allowed Addresses, Always Blocked Addresses or Trusted Proxies were not valid addresses or ranges and were not saved.', $dropped, 'devdome-country-blocker')), (int) $dropped);
                 ?>
             </div>
         <?php endif; ?>
         <?php if ($bad_url) : ?>
             <div class="dd-banner" data-dc-flash="1" style="border-color:#fde68a;background:#fffbeb;color:#92400e;margin-bottom:16px;" role="status"><?php esc_html_e('The redirect URL was not saved: it must be a full http or https address on another website. Until you enter one, blocked visitors get the 403 page.', 'devdome-country-blocker'); ?></div>
+        <?php endif; ?>
+        <?php if ($bad_tok) : ?>
+            <div class="dd-banner" data-dc-flash="1" style="border-color:#fde68a;background:#fffbeb;color:#92400e;margin-bottom:16px;" role="status"><?php esc_html_e('The Cloudflare token was not saved: a token is 20 to 200 letters, digits, dashes or underscores. Paste it exactly as Cloudflare shows it.', 'devdome-country-blocker'); ?></div>
+        <?php endif; ?>
+        <?php if ('ok' === $cf) : ?>
+            <div class="dd-banner" data-dc-flash="1" style="border-color:#a7f3d0;background:#ecfdf5;color:#065f46;margin-bottom:16px;" role="status"><?php echo esc_html('' !== $why ? $why : __('Done.', 'devdome-country-blocker')); ?></div>
+        <?php elseif ('fail' === $cf) : ?>
+            <div class="dd-banner" data-dc-flash="1" style="border-color:#fecaca;background:#fef2f2;color:#991b1b;margin-bottom:16px;" role="alert"><?php echo esc_html('' !== $why ? $why : __('Cloudflare did not accept the rule.', 'devdome-country-blocker')); ?></div>
         <?php endif; ?>
         <?php if ('ok' === $db) : ?>
             <div class="dd-banner" data-dc-flash="1" style="border-color:#a7f3d0;background:#ecfdf5;color:#065f46;margin-bottom:16px;" role="status"><?php echo esc_html('' !== $why ? $why : __('Database ready.', 'devdome-country-blocker')); ?></div>
@@ -753,7 +824,7 @@ function devdcoun_render_settings_tab($s, $sum)
             <?php wp_nonce_field('devdcoun_settings', '_dcsn'); ?>
 
             <div class="dd-sec-head"><span class="dashicons dashicons-admin-site-alt3 dd-ico" aria-hidden="true"></span><h2 class="dd-h2"><?php esc_html_e('Blocking', 'devdome-country-blocker'); ?></h2></div>
-            <p class="dc-intro"><?php esc_html_e('Blocks the page views that reach WordPress. Pages served by a full-page cache or a CDN, admin-ajax.php and the REST API are not blocked.', 'devdome-country-blocker'); ?> <?php devdcoun_tip(__('A full-page cache or CDN answers before WordPress runs, so a blocked visitor can still get a cached page: exclude the site from that cache for the countries you block, or add the same country rule at the cache, CDN or firewall. Background requests (admin-ajax.php, the REST API, for example a shop checkout call from a page that is already open) are left alone on purpose, so nothing on your site breaks.', 'devdome-country-blocker')); ?></p>
+            <p class="dc-intro"><?php esc_html_e('Blocks the page views that reach WordPress. Pages served by a full-page cache or a CDN are not blocked; admin-ajax.php and the REST API only when you turn their switches on below.', 'devdome-country-blocker'); ?> <?php devdcoun_tip(__('A full-page cache or CDN answers before WordPress runs, so a blocked visitor can still get a cached page: exclude the site from that cache for the countries you block, or add the same country rule at the cache, CDN or firewall. Background requests (admin-ajax.php, the REST API, for example a shop checkout call from a page that is already open) are left alone on purpose, so nothing on your site breaks.', 'devdome-country-blocker')); ?></p>
             <?php if (is_multisite()) : ?>
                 <p class="dc-intro"><?php esc_html_e('On a multisite network every site has its own settings, statistics and country lists: set up each site separately.', 'devdome-country-blocker'); ?></p>
             <?php endif; ?>
@@ -821,6 +892,8 @@ function devdcoun_render_settings_tab($s, $sum)
                     <?php devdcoun_setting_row('cb_test_mode', __('Test Mode', 'devdome-country-blocker'), __('Block nobody, only log who would be blocked.', 'devdome-country-blocker'), __('Try a country list before it turns anyone away: every visitor goes through, and the requests that would have been blocked appear in Recent Blocked Hits with the result Test. They are not counted as blocked. Turn it off to start blocking.', 'devdome-country-blocker'), (int) $s['test_mode']); ?>
                     <?php devdcoun_setting_row('cb_protect_login', __('Login Page', 'devdome-country-blocker'), __('Also block these countries on the login page.', 'devdome-country-blocker'), __('Stops login attempts from the blocked countries. Always Allowed Addresses still get in, and a save that would lock you out yourself is refused. If you ever get locked out while travelling, add define(\'DEVDCOUN_DISABLE\', true); to wp-config.php to switch all blocking off.', 'devdome-country-blocker'), (int) $s['protect_login'], __('Block', 'devdome-country-blocker')); ?>
                     <?php devdcoun_setting_row('cb_protect_xmlrpc', __('XML-RPC', 'devdome-country-blocker'), __('Also block these countries on xmlrpc.php.', 'devdome-country-blocker'), __('xmlrpc.php is an old remote-publishing door that login attacks like to use. Leave this off when a service in a blocked country (an app, Jetpack) must reach it, or put that service on Always Allowed Addresses.', 'devdome-country-blocker'), (int) $s['protect_xmlrpc'], __('Block', 'devdome-country-blocker')); ?>
+                    <?php devdcoun_setting_row('cb_protect_rest', __('REST API', 'devdome-country-blocker'), __('Also block these countries on REST API requests from visitors who are not logged in.', 'devdome-country-blocker'), __('Logged-in users, the block editor and apps that sign in keep working. A blocked request gets a 403 REST error instead of the page. Leave this off when a public app or a headless front end reads the REST API from the blocked countries.', 'devdome-country-blocker'), (int) $s['protect_rest']); ?>
+                    <?php devdcoun_setting_row('cb_protect_ajax', __('admin-ajax.php', 'devdome-country-blocker'), __('Also block these countries on admin-ajax.php requests from visitors who are not logged in.', 'devdome-country-blocker'), __('Themes and plugins use admin-ajax.php for forms, filters and carts. Logged-in users keep working; a blocked request gets a plain 403 answer.', 'devdome-country-blocker'), (int) $s['protect_ajax']); ?>
                 </table></div>
             </div>
 
@@ -828,7 +901,7 @@ function devdcoun_render_settings_tab($s, $sum)
             <div class="dd-card">
                 <div class="dc-tablewrap"><table class="form-table">
                     <?php devdcoun_setting_row('cb_skip_logged_in', __('Logged-In Users', 'devdome-country-blocker'), __('Never block a logged-in user (recommended).', 'devdome-country-blocker'), __('wp-admin is never blocked, and the login page only when you turn on Login Page above. This switch exempts logged-in users from the front-end block, for example your own editors abroad.', 'devdome-country-blocker'), (int) $s['skip_logged_in'], __('Never block', 'devdome-country-blocker')); ?>
-                    <?php devdcoun_setting_row('cb_allow_search', __('Search Engines', 'devdome-country-blocker'), __('Never block Google, Bing, DuckDuckGo and Apple crawlers or the DevDome health monitor (recommended).', 'devdome-country-blocker'), __('Crawlers and the DevDome site health checks come from data centres all over the world; blocking them removes your pages from search and makes the monitor report your site as down. The bypass matches the user agent, which a determined bot can fake, so it only ever lets a request through, never blocks one.', 'devdome-country-blocker'), (int) $s['allow_search'], __('Never block', 'devdome-country-blocker')); ?>
+                    <?php devdcoun_setting_row('cb_allow_search', __('Search Engines', 'devdome-country-blocker'), __('Never block Google, Bing, DuckDuckGo and Apple crawlers or the DevDome health monitor (recommended). A crawler counts only when its address is confirmed by reverse DNS.', 'devdome-country-blocker'), __('Crawlers and the DevDome site health checks come from data centres all over the world; blocking them removes your pages from search and makes the monitor report your site as down. The bypass matches the user agent, which a determined bot can fake, so it only ever lets a request through, never blocks one.', 'devdome-country-blocker'), (int) $s['allow_search'], __('Never block', 'devdome-country-blocker')); ?>
                     <?php devdcoun_setting_row('cb_trust_proxy', __('Proxy Headers', 'devdome-country-blocker'), __('Trust the CloudFront and Vercel country headers.', 'devdome-country-blocker'), __('Only turn this on when the site really runs behind Amazon CloudFront or Vercel: off those platforms anyone can send the header and pick their own country. Cloudflare needs no setting, its header is verified against the published Cloudflare address ranges automatically.', 'devdome-country-blocker'), (int) $s['trust_proxy'], __('Trust', 'devdome-country-blocker')); ?>
                     <tr>
                         <th scope="row"><?php esc_html_e('Trusted Proxies', 'devdome-country-blocker'); ?></th>
@@ -842,6 +915,90 @@ function devdcoun_render_settings_tab($s, $sum)
                         <td>
                             <textarea class="dd-textarea" name="cb_ip_allowlist" rows="3" placeholder="203.0.113.42&#10;198.51.100.0/24" aria-label="<?php esc_attr_e('Always allowed addresses', 'devdome-country-blocker'); ?>"><?php echo esc_textarea(implode("\n", $s['ip_allowlist'])); ?></textarea>
                             <p class="dd-hint"><?php esc_html_e('One per line: an IPv4 or IPv6 address, or a range like 198.51.100.0/24 or 2001:db8::/32.', 'devdome-country-blocker'); ?> <?php devdcoun_tip(__('Your office, your monitoring service, a partner: these addresses are never blocked whatever their country. Lines that are not a valid address or range are dropped on save.', 'devdome-country-blocker')); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Always Blocked Addresses', 'devdome-country-blocker'); ?></th>
+                        <td>
+                            <textarea class="dd-textarea" name="cb_ip_denylist" rows="3" placeholder="203.0.113.7&#10;192.0.2.0/24" aria-label="<?php esc_attr_e('Always blocked addresses', 'devdome-country-blocker'); ?>"><?php echo esc_textarea(implode("\n", $s['ip_denylist'])); ?></textarea>
+                            <p class="dd-hint"><?php esc_html_e('One per line: an address or a range that is blocked whatever its country, in every mode, even while country blocking is off.', 'devdome-country-blocker'); ?> <?php devdcoun_tip(__('A scraper, a spammer, a nuisance visitor: the address gets the same answer as a blocked country (your 403 page or the redirect). Always Allowed Addresses win over this list, logged-in users are never blocked, and Test Mode only logs. Your own address on this list is refused when the login page is protected.', 'devdome-country-blocker')); ?></p>
+                        </td>
+                    </tr>
+                </table></div>
+            </div>
+
+            <div class="dd-sec-head" style="margin-top:32px;"><span class="dashicons dashicons-networking dd-ico" aria-hidden="true"></span><h2 class="dd-h2"><?php esc_html_e('Networks', 'devdome-country-blocker'); ?></h2></div>
+            <p class="dc-intro"><?php esc_html_e('Block by network instead of by country: a network number (ASN) you name, or every known data-center, hosting and VPN network with one switch. Works in every mode, even while country blocking is off.', 'devdome-country-blocker'); ?> <?php devdcoun_tip(__('With a network rule on, the plugin asks the DevDome geo service which network a new visitor address belongs to: one lookup per address, cached for a day, at most 60 a minute, with a 2-second limit; when the service does not answer the visitor is let in. Without a network rule no address is sent anywhere. Logged-in users and Always Allowed Addresses are never blocked; a crawler exempted under Search Engines stays exempt on pages.', 'devdome-country-blocker')); ?></p>
+            <div class="dd-card">
+                <div class="dc-tablewrap"><table class="form-table">
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Blocked Networks', 'devdome-country-blocker'); ?></th>
+                        <td>
+                            <textarea class="dd-textarea" name="cb_block_asns" rows="2" placeholder="AS13335&#10;16509" aria-label="<?php esc_attr_e('Blocked networks', 'devdome-country-blocker'); ?>"><?php echo esc_textarea(implode("\n", array_map('strval', (array) $s['block_asns']))); ?></textarea>
+                            <p class="dd-hint"><?php esc_html_e('One network number per line, with or without the AS prefix. Every visitor from that network is blocked, whatever the country.', 'devdome-country-blocker'); ?> <?php devdcoun_tip(__('The network number (ASN) of an address is shown by services such as bgp.he.net or ipinfo.io. Blocking a whole network also blocks its real customers: use it for scraper farms and abusive hosts, not for consumer providers.', 'devdome-country-blocker')); ?></p>
+                        </td>
+                    </tr>
+                    <?php devdcoun_setting_row('cb_block_datacenter', __('Data Centers and VPNs', 'devdome-country-blocker'), __('Block visitors from known data-center, hosting and VPN networks.', 'devdome-country-blocker'), __('Real people browse from home and mobile networks; scrapers, bots and VPN users come from hosting networks. The list of about 1,500 networks is the shared DevDome list, downloaded once a day while this is on and removed when you turn it off. Verified search crawlers exempted under Search Engines stay exempt on pages; the DevDome health monitor is exempt too.', 'devdome-country-blocker'), (int) $s['block_datacenter']); ?>
+                    <?php if (!empty($s['block_datacenter'])) : ?>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Network List', 'devdome-country-blocker'); ?></th>
+                        <td><p class="dd-hint" style="margin:0;"><?php
+                            $n = count(devdcoun_dc_asns());
+                            $f = devdcoun_dc_asns_fetched();
+                            if ($n > 0 && $f > 0) {
+                                /* translators: 1: number of networks, 2: how long ago the list was downloaded. */
+                                echo esc_html(sprintf(__('%1$s networks, downloaded %2$s ago.', 'devdome-country-blocker'), number_format_i18n($n), human_time_diff($f)));
+                            } else {
+                                esc_html_e('Not downloaded yet: the list is fetched within a minute of saving and then once a day. Until then no data-center network is blocked.', 'devdome-country-blocker');
+                            }
+                        ?></p></td>
+                    </tr>
+                    <?php endif; ?>
+                </table></div>
+            </div>
+
+            <div class="dd-sec-head" style="margin-top:32px;"><span class="dashicons dashicons-cloud dd-ico" aria-hidden="true"></span><h2 class="dd-h2"><?php esc_html_e('Cloudflare', 'devdome-country-blocker'); ?></h2></div>
+            <p class="dc-intro"><?php esc_html_e('Block before the cache: push your country rule to Cloudflare as one WAF rule, so blocked visitors never reach your server or its cached pages. Optional; needs a Cloudflare API token for this site\'s zone.', 'devdome-country-blocker'); ?> <?php devdcoun_tip(__('Create the token in the Cloudflare dashboard under My Profile, API Tokens, Create Token, with the permissions Zone > Zone WAF > Edit and Zone > Zone > Read for this zone. The plugin adds one custom rule named DevDome Country Blocker (your mode and country list, Always Allowed Addresses excluded) and updates that same rule on every push; other rules are never touched. Save your settings first, then press Push. The rule does not follow later changes by itself: push again after you change the list.', 'devdome-country-blocker')); ?></p>
+            <div class="dd-card">
+                <div class="dc-tablewrap"><table class="form-table">
+                    <tr>
+                        <th scope="row"><?php esc_html_e('API Token', 'devdome-country-blocker'); ?></th>
+                        <td>
+                            <input type="password" class="dd-input" name="cb_cf_token" value="" autocomplete="off" placeholder="<?php echo '' !== devdcoun_cf_token_hint($s['cf_token']) ? esc_attr(sprintf(/* translators: %s: the last four characters of the saved token. */ __('Saved token ending in %s (leave empty to keep it, type CLEAR to remove it)', 'devdome-country-blocker'), devdcoun_cf_token_hint($s['cf_token']))) : esc_attr__('Paste a Cloudflare API token', 'devdome-country-blocker'); ?>" aria-label="<?php esc_attr_e('Cloudflare API token', 'devdome-country-blocker'); ?>">
+                            <p class="dd-hint"><?php esc_html_e('Stored in this site\'s settings and sent only to api.cloudflare.com when you press Push or Remove.', 'devdome-country-blocker'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Edge Rule', 'devdome-country-blocker'); ?></th>
+                        <td>
+                            <?php
+                            $cf_last = isset($s['cf_last']) && is_array($s['cf_last']) ? $s['cf_last'] : array();
+                            $in_sync = devdcoun_cf_in_sync($s);
+                            $expr    = devdcoun_cf_expression($s);
+                            if (null === $in_sync) {
+                                echo '<p class="dd-hint" style="margin:0 0 10px;">' . esc_html__('No rule pushed yet.', 'devdome-country-blocker') . '</p>';
+                            } elseif ($in_sync) {
+                                /* translators: 1: zone name, 2: how long ago. */
+                                echo '<p class="dd-hint" style="margin:0 0 10px;color:#065f46;">' . esc_html(sprintf(__('Rule live on zone %1$s, pushed %2$s ago. It matches the saved settings.', 'devdome-country-blocker'), isset($cf_last['zone']) ? $cf_last['zone'] : '', human_time_diff((int) $cf_last['at']))) . '</p>';
+                            } else {
+                                /* translators: 1: zone name, 2: how long ago. */
+                                echo '<p class="dd-hint" style="margin:0 0 10px;color:#92400e;">' . esc_html(sprintf(__('Rule live on zone %1$s, pushed %2$s ago, but the settings changed since: push again.', 'devdome-country-blocker'), isset($cf_last['zone']) ? $cf_last['zone'] : '', human_time_diff((int) $cf_last['at']))) . '</p>';
+                            }
+                            if (!empty($cf_last['msg']) && empty($cf_last['ok'])) {
+                                echo '<p class="dd-hint" style="margin:0 0 10px;color:#b91c1c;">' . esc_html(sprintf(/* translators: %s: the error text of the last push. */ __('Last push failed: %s', 'devdome-country-blocker'), (string) $cf_last['msg'])) . '</p>';
+                            }
+                            if ('' !== $expr) {
+                                echo '<p class="dd-hint" style="margin:0 0 12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all;">' . esc_html($expr) . '</p>';
+                            }
+                            ?>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                <button type="submit" class="dd-btn dd-btn-primary" name="devdcoun_cf_push" value="1" formaction="<?php echo esc_url(add_query_arg(array('page' => DEVDCOUN_PAGE, 'cb_tab' => 'settings'), admin_url('admin.php'))); ?>" <?php disabled('' === $s['cf_token'] || '' === $expr); ?>><span class="dashicons dashicons-cloud-upload"></span> <?php esc_html_e('Push to Cloudflare', 'devdome-country-blocker'); ?></button>
+                                <?php if (null !== $in_sync) : ?>
+                                <button type="submit" class="dd-btn" name="devdcoun_cf_remove" value="1" <?php disabled('' === $s['cf_token']); ?>><span class="dashicons dashicons-no-alt"></span> <?php esc_html_e('Remove from Cloudflare', 'devdome-country-blocker'); ?></button>
+                                <?php endif; ?>
+                            </div>
+                            <?php wp_nonce_field('devdcoun_cf_push', '_dccf', false); ?>
+                            <p class="dd-hint" style="margin-top:8px;"><?php esc_html_e('Push sends the saved settings, not unsaved changes on this screen.', 'devdome-country-blocker'); ?></p>
                         </td>
                     </tr>
                 </table></div>

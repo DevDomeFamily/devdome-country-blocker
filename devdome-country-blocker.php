@@ -3,7 +3,7 @@
 Plugin Name: DevDome Country Blocker
 Plugin URI: https://devdome.com/
 Description: Block or allow website visitors by country. Works with Cloudflare out of the box or with a free local IP database. No account, no external calls at runtime, nothing sent anywhere.
-Version: 1.0.5
+Version: 1.0.6
 Author: DevDome
 Author URI: https://devdome.com
 Text Domain: devdome-country-blocker
@@ -23,7 +23,7 @@ if (file_exists(__DIR__ . '/wporg-build.php')) {
     require __DIR__ . '/wporg-build.php';
 }
 
-define('DEVDCOUN_VERSION', '1.0.5');
+define('DEVDCOUN_VERSION', '1.0.6');
 define('DEVDCOUN_DIR', plugin_dir_path(__FILE__));
 define('DEVDCOUN_URL', plugin_dir_url(__FILE__));
 define('DEVDCOUN_FILE', __FILE__);
@@ -44,6 +44,8 @@ require_once DEVDCOUN_DIR . 'includes/countries.php';
 require_once DEVDCOUN_DIR . 'includes/cf-ranges.php';
 require_once DEVDCOUN_DIR . 'includes/dbip.php';
 require_once DEVDCOUN_DIR . 'includes/geo.php';
+require_once DEVDCOUN_DIR . 'includes/network.php';    // 25 Oct 2026: ASN + data-center / VPN rules
+require_once DEVDCOUN_DIR . 'includes/cloudflare.php'; // 25 Oct 2026: Push to Cloudflare
 require_once DEVDCOUN_DIR . 'includes/blocker.php';
 require_once DEVDCOUN_DIR . 'includes/abilities.php'; // WordPress Abilities API (6.9+): registers nothing on older versions
 
@@ -182,6 +184,21 @@ add_filter('devdcorev1_suite_report_sections', function ($s) {
     return $s;
 });
 
+// First activation (install.php sets the transient): open this plugin's screen once, the DevDome Account card
+// when the site is not linked yet. Bulk activation, AJAX, cron and WP-CLI never redirect.
+add_action('admin_init', function () {
+    if (!get_transient('devdcoun_activation_redirect')) {
+        return;
+    }
+    delete_transient('devdcoun_activation_redirect');
+    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only: a bulk activation never redirects.
+    if (isset($_GET['activate-multi']) || wp_doing_ajax() || wp_doing_cron() || (defined('WP_CLI') && WP_CLI) || !current_user_can('activate_plugins')) {
+        return;
+    }
+    $connected = function_exists('devdcorev1_account_is_connected') && devdcorev1_account_is_connected();
+    wp_safe_redirect($connected ? admin_url('admin.php?page=' . 'devdome-country-blocker') : admin_url('admin.php?page=' . (defined('DEVDCOREV1_TOOLS_MENU_SLUG') ? DEVDCOREV1_TOOLS_MENU_SLUG : 'devdcorev1-tools')));
+    exit;
+});
 register_activation_hook(__FILE__, 'devdcoun_activate');
 register_deactivation_hook(__FILE__, 'devdcoun_deactivate');
 

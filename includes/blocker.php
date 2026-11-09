@@ -14,11 +14,79 @@
 
 defined('ABSPATH') || exit;
 
-/** Major search-engine user agents and the DevDome site health monitor (optional bypass; user-agent based, stated in the UI). */
-function devdcoun_is_search_engine()
+/**
+ * Major search-engine crawlers and the DevDome site health monitor (optional bypass). Security review 2026-10-19:
+ * the crawler user agent alone used to open the bypass, so any visitor typing "Googlebot" walked past the country
+ * block. Now a search-engine user agent counts only when the address forward-confirms by reverse DNS to that
+ * operator (googlebot.com / google.com, search.msn.com, duckduckgo.com, applebot.apple.com), cached per address
+ * (a week when confirmed, an hour when not). The DevDome health monitor keeps the user-agent match: it runs from
+ * DevDome's own servers and gains nothing from the bypass beyond reaching the page it checks.
+ */
+function devdcoun_is_search_engine($ip = null)
 {
     $ua = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '';
-    return $ua !== '' && preg_match('/Googlebot|bingbot|DuckDuckBot|Applebot|DevDomeHealth/i', $ua);
+    if ($ua === '') {
+        return false;
+    }
+    if (preg_match('/DevDomeHealth/i', $ua)) {
+        return true;
+    }
+    if (!preg_match('/Googlebot|bingbot|DuckDuckBot|Applebot/i', $ua)) {
+        return false;
+    }
+    $ip = null === $ip ? devdcoun_visitor_ip() : (string) $ip;
+    return $ip !== '' && devdcoun_crawler_fcrdns($ip);
+}
+
+/** Cached forward-confirmed reverse DNS: does the address belong to Google, Bing, DuckDuckGo or Apple's crawler? */
+function devdcoun_crawler_fcrdns($ip)
+{
+    $key    = 'devdcoun_fcr_' . md5($ip);
+    $cached = get_transient($key);
+    if ($cached !== false) {
+        return $cached === '1';
+    }
+    $ok = devdcoun_crawler_fcrdns_check($ip) ? '1' : '0';
+    set_transient($key, $ok, $ok === '1' ? WEEK_IN_SECONDS : HOUR_IN_SECONDS);
+    return $ok === '1';
+}
+
+function devdcoun_crawler_fcrdns_check($ip)
+{
+    if (!function_exists('gethostbyaddr') || !function_exists('gethostbyname') || !function_exists('dns_get_record')) {
+        return false; // DNS functions disabled on this host: unverified, never a fatal
+    }
+    $host = @gethostbyaddr($ip);
+    if (!$host || $host === $ip) {
+        return false;
+    }
+    $host  = strtolower(rtrim($host, '.'));
+    $match = false;
+    foreach (array('.googlebot.com', '.google.com', '.search.msn.com', '.duckduckgo.com', '.applebot.apple.com') as $sfx) {
+        if (strlen($host) > strlen($sfx) && substr($host, -strlen($sfx)) === $sfx) {
+            $match = true;
+            break;
+        }
+    }
+    if (!$match) {
+        return false;
+    }
+    $packed = @inet_pton($ip);
+    if ($packed === false) {
+        return false;
+    }
+    if (strlen($packed) === 4) {
+        return @gethostbyname($host) === $ip; // forward-confirm IPv4
+    }
+    $recs = @dns_get_record($host, DNS_AAAA); // forward-confirm IPv6
+    if (is_array($recs)) {
+        foreach ($recs as $rec) {
+            if (!empty($rec['ipv6']) && @inet_pton($rec['ipv6']) === $packed) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 /**
@@ -34,22 +102,46 @@ function devdcoun_decide($cc = null, $ip = null, $area = 'site')
         return array(false, '', 'disabled'); // wp-config.php recovery switch
     }
     $s = devdcoun_settings();
-    if ($s['mode'] === 'off') {
+    // 25 Oct 2026: Always Blocked Addresses work in every mode, so a site can block single addresses without a country
+    // list. Order: the logged-in exemption, then the allowlist (it always wins), then the deny list, then countries.
+    $has_deny  = !empty($s['ip_denylist']);
+    $has_extra = $has_deny || (function_exists('devdcoun_network_rules_active') && devdcoun_network_rules_active($s));
+    if ($s['mode'] === 'off' && !$has_extra) {
         return array(false, '', 'off');
     }
     $list = devdcoun_active_countries($s);
-    if (empty($list)) {
+    if (empty($list) && !$has_extra) {
         return array(false, '', 'no_countries');
     }
     if ('site' === $area && $s['skip_logged_in'] && is_user_logged_in()) {
         return array(false, '', 'logged_in');
     }
-    if ('site' === $area && $s['allow_search'] && devdcoun_is_search_engine()) {
+    $ip = null === $ip ? devdcoun_visitor_ip() : (string) $ip;
+    if ('site' === $area && $s['allow_search'] && devdcoun_is_search_engine($ip)) {
         return array(false, '', 'search_engine');
     }
-    $ip = null === $ip ? devdcoun_visitor_ip() : (string) $ip;
     if ($ip !== '' && !empty($s['ip_allowlist']) && devdcoun_ip_in_list($ip, $s['ip_allowlist'])) {
         return array(false, '', 'allowlist');
+    }
+    if ($ip !== '' && $has_deny && devdcoun_ip_in_list($ip, $s['ip_denylist'])) {
+        if (null === $cc) {
+            list($cc, ) = devdcoun_country(); // for the statistics only; the address decides
+        }
+        return array(true, strtoupper((string) $cc), 'denylist');
+    }
+    // 25 Oct 2026: network rules (a listed ASN, or any data-center / VPN network while that switch is on). The lookup
+    // runs only for a public address with a rule on, is cached a day and fails open (unknown network = allowed).
+    if ($ip !== '' && $has_extra && function_exists('devdcoun_network_verdict')) {
+        $net = devdcoun_network_verdict($ip, $s);
+        if ('' !== $net) {
+            if (null === $cc) {
+                list($cc, ) = devdcoun_country();
+            }
+            return array(true, strtoupper((string) $cc), $net);
+        }
+    }
+    if ($s['mode'] === 'off' || empty($list)) {
+        return array(false, '', $s['mode'] === 'off' ? 'off' : 'no_countries');
     }
     if (null === $cc) {
         list($cc, ) = devdcoun_country();
@@ -69,11 +161,26 @@ function devdcoun_decide($cc = null, $ip = null, $area = 'site')
  */
 function devdcoun_would_lock_out(array $clean)
 {
-    if (empty($clean['protect_login']) || !empty($clean['test_mode']) || 'off' === $clean['mode']) {
+    if (empty($clean['protect_login']) || !empty($clean['test_mode'])) {
         return false;
     }
     list($cc, $src) = devdcoun_country();
     $ip = devdcoun_visitor_ip(isset($clean['trusted_proxies']) ? (array) $clean['trusted_proxies'] : null);
+    // 25 Oct 2026: the saver's own address on Always Blocked Addresses (and not on the allowlist) is a lockout too.
+    if ('' !== $ip && !empty($clean['ip_denylist']) && devdcoun_ip_in_list($ip, (array) $clean['ip_denylist'])
+        && !devdcoun_ip_in_list($ip, (array) (isset($clean['ip_allowlist']) ? $clean['ip_allowlist'] : array()))) {
+        return true;
+    }
+    // 25 Oct 2026: the saver's own network on the list, or a data-center / VPN network while that switch is on
+    // (an owner on a VPN), is a lockout too. One cached lookup; an unknown network never counts as a lockout.
+    if ('' !== $ip && function_exists('devdcoun_network_rules_active') && devdcoun_network_rules_active($clean)
+        && !devdcoun_ip_in_list($ip, (array) (isset($clean['ip_allowlist']) ? $clean['ip_allowlist'] : array()))
+        && '' !== devdcoun_network_reason(devdcoun_asn($ip), $clean)) {
+        return true;
+    }
+    if ('off' === $clean['mode']) {
+        return false;
+    }
     if ('cloudflare' !== $src) {
         // Everything but a verified Cloudflare answer is judged again with the PROPOSED settings: the address as the
         // proposed Trusted Proxies list resolves it, looked up locally; a proxy header only counts below, when it stays on.
@@ -144,6 +251,54 @@ function devdcoun_enforce_xmlrpc()
     }
 }
 add_action('init', 'devdcoun_enforce_xmlrpc', 0);
+
+/**
+ * 25 Oct 2026: the REST API, only when the owner turned it on and only for a visitor who is not logged in
+ * (the editor, apps and logged-in users keep working). Answered as a REST error, not as the 403 page.
+ */
+function devdcoun_enforce_rest($result)
+{
+    if (null !== $result && false !== $result) {
+        return $result; // another check already answered
+    }
+    if (!devdcoun_setting('protect_rest') || is_user_logged_in()) {
+        return $result;
+    }
+    list($blocked, $cc, ) = devdcoun_decide(null, null, 'rest');
+    if (!$blocked) {
+        return $result;
+    }
+    $s = devdcoun_settings();
+    devdcoun_log_hit($cc, !empty($s['test_mode']));
+    if (!empty($s['test_mode'])) {
+        return $result;
+    }
+    return new WP_Error('devdcoun_blocked', __('Not available in your region.', 'devdome-country-blocker'), array('status' => 403));
+}
+add_filter('rest_authentication_errors', 'devdcoun_enforce_rest', 5);
+
+/** 25 Oct 2026: admin-ajax.php for a visitor who is not logged in, only when the owner turned it on. */
+function devdcoun_enforce_ajax()
+{
+    if (!wp_doing_ajax() || !devdcoun_setting('protect_ajax') || is_user_logged_in()) {
+        return;
+    }
+    list($blocked, $cc, ) = devdcoun_decide(null, null, 'ajax');
+    if (!$blocked) {
+        return;
+    }
+    $s = devdcoun_settings();
+    devdcoun_log_hit($cc, !empty($s['test_mode']));
+    if (!empty($s['test_mode'])) {
+        return;
+    }
+    nocache_headers();
+    status_header(403);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo esc_html($s['message'] !== '' ? $s['message'] : __('Sorry, this website is not available in your region.', 'devdome-country-blocker'));
+    exit;
+}
+add_action('admin_init', 'devdcoun_enforce_ajax', 0);
 
 /** Log the hit, then answer it: nothing in test mode, else the redirect or the 403 page. */
 function devdcoun_respond($cc)

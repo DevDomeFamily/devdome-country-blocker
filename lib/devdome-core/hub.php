@@ -35,6 +35,7 @@ function devdcorev1_hub_catalog()
     // Empty => the card shows "Get it →" (link out to devdome.com) only. plugin_file: folder/main.php.
     // Canonical suite order (position): insight -> protection -> money/links -> cleanup -> backup.
     $list = array(
+        'devdome-ai-assistant'     => array('name' => 'AI Assistant',     'icon' => 'dashicons-format-chat', 'desc' => 'Ask your site what needs doing; the assistant checks the DevDome plugins and runs the fixes you approve.', 'get_url' => 'https://devdome.com/wp-plugins/', 'position' => 1, 'wporg_slug' => '', 'listed' => false, 'plugin_file' => 'devdome-ai-assistant/devdome-ai-assistant.php'),
         'devdome-analytics'        => array('name' => 'Analytics',        'icon' => 'dashicons-chart-area',  'desc' => 'Real traffic without bot noise: visitors, AI referrals &amp; outbound clicks, bots reported separately.',            'get_url' => 'https://devdome.com/wp-plugins/analytics/',        'position' => 10,  'wporg_slug' => 'devdome-analytics', 'listed' => true, 'plugin_file' => 'devdome-analytics/devdome-analytics.php'),
         'devdome-site-monitor'     => array('name' => 'Site Monitor',     'icon' => 'dashicons-heart',       'desc' => 'Uptime, speed, security, SEO &amp; affiliate health in one dashboard.',     'get_url' => 'https://devdome.com/wp-plugins/',     'position' => 20,  'wporg_slug' => '', 'listed' => false, 'plugin_file' => 'devdome-site-monitor/devdome-site-monitor.php'),
         'devdome-bot-protection'   => array('name' => 'Bot Protection',   'icon' => 'dashicons-shield',      'desc' => 'Block fake clicks &amp; bot traffic so your stats stay real.',               'get_url' => 'https://devdome.com/wp-plugins/',   'position' => 30,  'wporg_slug' => '', 'listed' => false, 'plugin_file' => 'devdome-bot-protection/devdome-bot-protection.php'),
@@ -367,6 +368,7 @@ function devdcorev1_hub_submenu_rank($slug, $parent)
     // Token match on the page-slug so suffixes (-dashboard, -settings, sub-pages) still sort right.
     // Checked in order; first token found wins. The product order is the canonical suite order.
     $tokens = array(
+        'ai-assistant'   => 5,  // first under the Dashboard (owner 18 Oct 2026)
         'analytics'      => 10,
         'site-monitor'   => 20,
         'bot-protection' => 30,
@@ -495,22 +497,27 @@ function devdcorev1_analytics_card()
     }
     $dismiss = wp_nonce_url(add_query_arg('devdcorev1_an_card_dismiss', 1), 'devdcorev1_an_card');
     $tools   = add_query_arg(array('page' => DEVDCOREV1_TOOLS_MENU_SLUG), admin_url('admin.php'));
+    // Zip audit 2026-10-19: no literal <style> in output (wp.org rule); the card's rules ride an inline style on an
+    // empty handle, printed with the late styles of this admin page.
+    wp_register_style('devdcorev1-an-card', false, array(), DEVDCOREV1_VERSION);
+    wp_enqueue_style('devdcorev1-an-card');
+    wp_add_inline_style('devdcorev1-an-card', implode("
+", array(
+        '.ddan-card{display:flex;align-items:center;gap:16px;margin:16px 24px 0;padding:14px 18px;background:#0b1224;color:#fff;border-radius:12px;position:relative;max-width:1000px;box-sizing:border-box}',
+        '.ddan-ic{flex:0 0 42px;width:42px;height:42px;border-radius:10px;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;letter-spacing:-.5px}',
+        '.ddan-body{flex:1 1 auto;min-width:0}',
+        '.ddan-body strong{display:block;font-size:15px;line-height:1.3;margin:0 0 3px;color:#fff;font-weight:800}',
+        '.ddan-body span{display:block;font-size:13px;line-height:1.45;color:#fff;font-weight:600}',
+        '.ddan-body .ddan-key{margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.18)}',
+        '.ddan-body a{color:#c7d2fe;text-decoration:underline;font-weight:700}',
+        '.ddan-body a:hover{text-decoration:underline}',
+        '.ddan-btn{flex:0 0 auto;background:#4f46e5;color:#fff;font-weight:700;font-size:13px;padding:9px 16px;border-radius:9px;text-decoration:none;white-space:nowrap}',
+        '.ddan-btn:hover,.ddan-btn:focus{background:#4338ca;color:#fff}',
+        '.ddan-x{position:absolute;top:6px;right:10px;color:#c7d2fe;text-decoration:none;font-size:18px;line-height:1}',
+        '.ddan-x:hover{color:#fff}',
+        '@media (max-width:782px){.ddan-card{flex-wrap:wrap;margin:12px 10px 0}.ddan-btn{width:100%;text-align:center}}',
+    )));
     ?>
-    <style>
-    .ddan-card{display:flex;align-items:center;gap:16px;margin:16px 24px 0;padding:14px 18px;background:#0b1224;color:#fff;border-radius:12px;position:relative;max-width:1000px;box-sizing:border-box}
-    .ddan-ic{flex:0 0 42px;width:42px;height:42px;border-radius:10px;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;letter-spacing:-.5px}
-    .ddan-body{flex:1 1 auto;min-width:0}
-    .ddan-body strong{display:block;font-size:15px;line-height:1.3;margin:0 0 3px;color:#fff;font-weight:800}
-    .ddan-body span{display:block;font-size:13px;line-height:1.45;color:#fff;font-weight:600}
-    .ddan-body .ddan-key{margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.18)}
-    .ddan-body a{color:#c7d2fe;text-decoration:underline;font-weight:700}
-    .ddan-body a:hover{text-decoration:underline}
-    .ddan-btn{flex:0 0 auto;background:#4f46e5;color:#fff;font-weight:700;font-size:13px;padding:9px 16px;border-radius:9px;text-decoration:none;white-space:nowrap}
-    .ddan-btn:hover,.ddan-btn:focus{background:#4338ca;color:#fff}
-    .ddan-x{position:absolute;top:6px;right:10px;color:#c7d2fe;text-decoration:none;font-size:18px;line-height:1}
-    .ddan-x:hover{color:#fff}
-    @media (max-width:782px){.ddan-card{flex-wrap:wrap;margin:12px 10px 0}.ddan-btn{width:100%;text-align:center}}
-    </style>
     <div class="ddan-card">
         <span class="ddan-ic">DD</span>
         <div class="ddan-body">
@@ -631,7 +638,7 @@ function devdcorev1_hub_render_default()
             $dd_retry_url = '' !== $dd_retry ? add_query_arg(array('page' => DEVDCOREV1_TOOLS_MENU_SLUG, 'dd_connect' => 1, 'rt' => $dd_retry), admin_url('admin.php')) : '';
             $dd_msgs = array(
                 'start'   => 'Could not start the connection. The detail below says why (a blocked outbound request, or a callback address DevDome does not accept). Fix that, then press Connect again.',
-                'expired' => 'This connect link has expired or was already used. Press Connect again to start a fresh one (it stays valid for 10 minutes).',
+                'expired' => 'This connect link has expired or was already used. Press Connect again to start a fresh one (it stays valid for 60 minutes).',
                 'verify'  => 'DevDome did not confirm the connection for this site. Press Try again or Connect again; if it keeps failing, send the detail below to support@devdome.com.',
             );
             if ('' !== $dd_err && isset($dd_msgs[$dd_err])) : ?>
@@ -648,7 +655,7 @@ function devdcorev1_hub_render_default()
                     <span class="ddh-ci">DD</span>
                     <div class="ddh-cbody">
                         <strong>Connect this site to your DevDome account</strong>
-                        <span>Connect sends your domain, site token, active DevDome plugins and their versions, and the DevDome library, WordPress and PHP versions to api.devdome.com with the recurring account checks. Nothing about users, content or visitors. See each plugin&rsquo;s readme, External services, for details. <a href="https://devdome.com/privacy-policy" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">Privacy Policy</a> &middot; <a href="https://devdome.com/terms-of-service" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">Terms of Service</a></span>
+                        <span>Connect sends your domain, site token, active DevDome plugins and their versions, and the DevDome library, WordPress and PHP versions to api.devdome.com and analytics.devdome.com with the recurring account checks. Nothing about users, content or visitors. See each plugin&rsquo;s readme, External services, for details. <a href="https://devdome.com/privacy-policy" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">Privacy Policy</a> &middot; <a href="https://devdome.com/terms-of-service" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">Terms of Service</a></span>
                     </div>
                     <div class="ddh-cctl">
                         <div class="ddh-cpanel">
@@ -681,6 +688,23 @@ function devdcorev1_hub_render_default()
                         <button type="submit" name="devdcorev1_disconnect" value="1" class="ddh-btn ddh-btn-ghost">Disconnect</button>
                     </form>
                 </div>
+                <?php
+                // Core 1.7.15 (M001): 12 accounts / 23 sites connected through another DevDome plugin, never installed
+                // Analytics, and saw an empty traffic dashboard. Said here, where the owner looks. Options, not
+                // is_plugin_active() (admin-only helper the library never loads itself).
+                $an_file   = 'devdome-analytics/devdome-analytics.php';
+                $an_active = in_array($an_file, (array) get_option('active_plugins', array()), true)
+                    || (is_multisite() && array_key_exists($an_file, (array) get_site_option('active_sitewide_plugins', array())));
+                if (!$an_active) :
+                    $an_url = current_user_can('install_plugins')
+                        ? add_query_arg(array('s' => 'devdome-analytics', 'tab' => 'search', 'type' => 'term'), admin_url('plugin-install.php'))
+                        : 'https://wordpress.org/plugins/devdome-analytics/';
+                ?>
+                <div class="ddh-cbody" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;">
+                    <strong>Analytics is not installed on this site</strong>
+                    <span>The site is connected, but without the free DevDome Analytics plugin no visit is recorded and the traffic dashboard on devdome.com stays empty. <a href="<?php echo esc_url($an_url); ?>">Install Analytics</a></span>
+                </div>
+                <?php endif; ?>
             </div>
             <?php endif; ?>
 

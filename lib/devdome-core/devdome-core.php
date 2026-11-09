@@ -20,7 +20,7 @@ if (defined('DEVDCOREV1_LOADED')) {
     return; // a higher/equal version already loaded the library
 }
 define('DEVDCOREV1_LOADED', true);
-define('DEVDCOREV1_VERSION', '1.7.13');
+define('DEVDCOREV1_VERSION', '1.7.17');
 
 if (!defined('DEVDCOREV1_FEED_ENDPOINT')) {
     define('DEVDCOREV1_FEED_ENDPOINT', 'https://api.devdome.com/bot-protection');
@@ -344,6 +344,190 @@ if (!function_exists('devdcorev1_get_feeds')) {
         return '';
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // Trusted-proxy client address (security review 2026-10-19, item 3): one helper for every plugin
+    // that keys a rate limit, a block list or a stored visitor address on "the client IP". Copied from
+    // Activity Log's includes/proxy.php, the model the review named. The rule: a forwarded header is
+    // believed ONLY when the TCP peer (REMOTE_ADDR, the one address the handshake proves) is a
+    // Cloudflare edge (CF-Connecting-IP) or inside a range the owner typed (X-Forwarded-For walked from
+    // the right, skipping the owner's own hops). Analytics keeps its older heuristic as an opt-in:
+    // a LOCAL peer (loopback / private) vouches for X-Forwarded-For, walked from the right to the
+    // first public hop, never the leftmost entry the client typed.
+    // ------------------------------------------------------------------------------------------------
+
+    /** Owner-typed trusted-proxy ranges -> validated CIDR strings (one per line or comma separated; a bare address = /32 or /128). */
+    function devdcorev1_trusted_proxies($raw)
+    {
+        $out = array();
+        foreach (preg_split('/[\r\n,]+/', (string) $raw) as $entry) {
+            $entry = trim($entry);
+            if ('' !== $entry && devdcorev1_valid_cidr($entry)) {
+                $out[] = $entry;
+            }
+        }
+        return $out;
+    }
+
+    /** Entries the owner typed that are not an address or a CIDR range (shown as a warning, never used). */
+    function devdcorev1_invalid_proxies($raw)
+    {
+        $out = array();
+        foreach (preg_split('/[\r\n,]+/', (string) $raw) as $entry) {
+            $entry = trim($entry);
+            if ('' !== $entry && !devdcorev1_valid_cidr($entry)) {
+                $out[] = $entry;
+            }
+        }
+        return $out;
+    }
+
+    /** A single address or an address/prefix, IPv4 or IPv6. */
+    function devdcorev1_valid_cidr($entry)
+    {
+        $parts = explode('/', (string) $entry, 2);
+        if (false === filter_var($parts[0], FILTER_VALIDATE_IP)) {
+            return false;
+        }
+        if (!isset($parts[1])) {
+            return true;
+        }
+        if (!ctype_digit($parts[1])) {
+            return false;
+        }
+        $max = (false !== filter_var($parts[0], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) ? 32 : 128;
+        return (int) $parts[1] >= 0 && (int) $parts[1] <= $max;
+    }
+
+    /** Binary CIDR containment; false for a family mismatch or unparseable input. */
+    function devdcorev1_ip_in_cidr($ip, $cidr)
+    {
+        $parts   = explode('/', (string) $cidr, 2);
+        $ip_bin  = @inet_pton((string) $ip);
+        $net_bin = @inet_pton($parts[0]);
+        if (false === $ip_bin || false === $net_bin || strlen($ip_bin) !== strlen($net_bin)) {
+            return false;
+        }
+        $bits = isset($parts[1]) ? (int) $parts[1] : strlen($ip_bin) * 8;
+        $bits = max(0, min(strlen($ip_bin) * 8, $bits));
+        if (0 === $bits) {
+            return true;
+        }
+        $whole = intdiv($bits, 8);
+        $rest  = $bits % 8;
+        if ($whole > 0 && substr($ip_bin, 0, $whole) !== substr($net_bin, 0, $whole)) {
+            return false;
+        }
+        if (0 === $rest) {
+            return true;
+        }
+        $mask = chr((0xFF << (8 - $rest)) & 0xFF);
+        return (substr($ip_bin, $whole, 1) & $mask) === (substr($net_bin, $whole, 1) & $mask);
+    }
+
+    /** True for an address no client can reach the internet from: loopback, link-local, private, unspecified. */
+    function devdcorev1_is_internal_ip($ip)
+    {
+        $ip = (string) $ip;
+        if (false !== filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return false === filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+        }
+        if (false === filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            return true; // not an address at all
+        }
+        if (preg_match('/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i', $ip, $m) && false !== filter_var($m[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return false === filter_var($m[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+        }
+        foreach (array('::/128', '::1/128', 'fe80::/10', 'fc00::/7', '::ffff:0:0/96') as $range) {
+            if (devdcorev1_ip_in_cidr($ip, $range)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** True when the address is inside one of the validated trusted-proxy ranges. */
+    function devdcorev1_is_trusted_proxy($ip, array $proxies)
+    {
+        foreach ($proxies as $cidr) {
+            if (devdcorev1_ip_in_cidr($ip, $cidr)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Resolve the client from a forwarded chain ("client, hop1, hop2"), walking from the peer inward.
+     * $proxies = the owner's ranges; with $local_peer the peer itself vouches (Analytics heuristic) and
+     * internal hops are skipped instead of refused. Returns '' when nothing in the chain may be believed.
+     */
+    function devdcorev1_resolve_forwarded($peer, $chain, array $proxies, $local_peer = false)
+    {
+        if ('' === $peer || (!$local_peer && !devdcorev1_is_trusted_proxy($peer, $proxies))) {
+            return '';
+        }
+        $hops = array_map('trim', explode(',', (string) $chain));
+        for ($i = count($hops) - 1; $i >= 0; $i--) {
+            $hop = $hops[$i];
+            if (preg_match('/^\[(.+)\](?::\d+)?$/', $hop, $m)) {
+                $hop = $m[1];
+            } elseif (substr_count($hop, ':') === 1 && false !== strpos($hop, '.')) {
+                $hop = substr($hop, 0, strpos($hop, ':'));
+            }
+            if (false === filter_var($hop, FILTER_VALIDATE_IP)) {
+                return ''; // malformed hop: refuse the whole chain rather than guess
+            }
+            if ($proxies && devdcorev1_is_trusted_proxy($hop, $proxies)) {
+                continue; // one of the owner's own edges; keep walking inward
+            }
+            if (devdcorev1_is_internal_ip($hop)) {
+                if ($local_peer) {
+                    continue; // a local chain (nginx -> Apache -> ...): skip the internal hops
+                }
+                return ''; // an internal address behind a public edge is a misconfiguration, not a client
+            }
+            return $hop;
+        }
+        return '';
+    }
+
+    /**
+     * The client address for a plugin's rate limit, block list or stored visitor IP.
+     * Order: Cloudflare edge -> CF-Connecting-IP; owner-trusted peer -> X-Forwarded-For from the right;
+     * $local_fallback and a loopback / private peer -> X-Forwarded-For from the right to the first public
+     * hop; otherwise REMOTE_ADDR. Never returns a value the client could have typed.
+     */
+    function devdcorev1_client_ip($trusted_raw = '', $local_fallback = false)
+    {
+        $peer = isset($_SERVER['REMOTE_ADDR']) ? filter_var(trim(sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR']))), FILTER_VALIDATE_IP) : false;
+        if (false === $peer) {
+            return '';
+        }
+        $trust_cf = (bool) apply_filters('devdcorev1_trust_cf_ip', devdcorev1_peer_is_cloudflare());
+        if ($trust_cf && !empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+            $cf = filter_var(trim(sanitize_text_field(wp_unslash($_SERVER['HTTP_CF_CONNECTING_IP']))), FILTER_VALIDATE_IP);
+            if (false !== $cf) {
+                return $cf;
+            }
+        }
+        $chain = isset($_SERVER['HTTP_X_FORWARDED_FOR']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_X_FORWARDED_FOR'])) : '';
+        if ('' !== $chain) {
+            $proxies = devdcorev1_trusted_proxies($trusted_raw);
+            if ($proxies && devdcorev1_is_trusted_proxy($peer, $proxies)) {
+                $client = devdcorev1_resolve_forwarded($peer, $chain, $proxies, false);
+                if ('' !== $client) {
+                    return $client;
+                }
+            } elseif ($local_fallback && devdcorev1_is_internal_ip($peer)) {
+                $client = devdcorev1_resolve_forwarded($peer, $chain, array(), true);
+                if ('' !== $client) {
+                    return $client;
+                }
+            }
+        }
+        return $peer;
+    }
+
     /** Delete this guard's expired transient pairs (the value row and its timeout row), nothing else. */
     function devdcorev1_beacon_rate_sweep()
     {
@@ -391,6 +575,14 @@ if (!function_exists('devdcorev1_get_feeds')) {
         // the old key carried the minute, so without an object cache every IP minted two fresh wp_options
         // rows a minute that sat expired until WordPress's daily sweep (half of all beacon rows on a fleet
         // site). Now a returning IP reuses its row, and about one request in fifty removes the expired ones.
+        // Security review 2026-10-19 (#12): an IPv6 visitor is bucketed on the /64 (one household, one bucket), so a
+        // client holding a prefix cannot mint a fresh 120/min allowance (and a transient row) per address.
+        if (false !== filter_var($bucket_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            $packed = @inet_pton($bucket_ip);
+            if (false !== $packed && 16 === strlen($packed)) {
+                $bucket_ip = inet_ntop(substr($packed, 0, 8) . str_repeat("\0", 8)) . '/64';
+            }
+        }
         $key = 'devdcorev1_beacon_rate_' . md5($bucket_ip);
         $minute = (int) floor(time() / 60);
         $b = get_transient($key);
@@ -575,6 +767,11 @@ if (!function_exists('devdcorev1_get_feeds')) {
     }
     if (file_exists(__DIR__ . '/hub-install-selfhost.php')) {
         require_once __DIR__ . '/hub-install-selfhost.php';
-    require_once __DIR__ . '/hub-telemetry.php'; // opt-in "Help improve DevDome" usage reports, core 1.7.12
+    // Opt-in "Help improve DevDome" usage reports, core 1.7.12. Only a plugin that offers the box ships the
+    // file (zip audit 2026-10-19: the others strip lib/devdome-core/hub-telemetry.php through .wporg-strip, so
+    // no zip carries an endpoint its readme does not disclose); the loader must not fatal without it.
+    if (file_exists(__DIR__ . '/hub-telemetry.php')) {
+        require_once __DIR__ . '/hub-telemetry.php';
+    }
     }
 }

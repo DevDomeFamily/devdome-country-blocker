@@ -39,6 +39,7 @@ if (!function_exists('devdcorev1_uninstall_cleanup')) {
         delete_option('devdcorev1_connected_at');
         delete_option('devdcorev1_hub_connect_dismissed');
         delete_option('devdcorev1_connect_started');
+        delete_option('devdcorev1_connrt_last'); // core 1.7.15: the hub's connect re-poll handle
         delete_option('devdcorev1_inventory_consent');
         delete_option('devdcorev1_connection_gen');
         // Core audit 2026-10-16: the Analytics mention card dismissal (1.7.13), the update-heal records

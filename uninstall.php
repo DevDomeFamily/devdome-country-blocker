@@ -10,14 +10,19 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
 
 function devdcoun_uninstall_site()
 {
+    delete_transient('devdcoun_activation_redirect'); // the first-activation redirect flag (60 s), gone anyway
     global $wpdb;
     foreach (array('devdcoun_daily', 'devdcoun_log') as $t) {
         $wpdb->query('DROP TABLE IF EXISTS `' . esc_sql($wpdb->prefix . $t) . '`'); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.SchemaChange -- uninstall
     }
-    foreach (array('devdcoun_settings', 'devdcoun_summary', 'devdcoun_db_meta', 'devdcoun_db_version', 'devdcoun_db_build_lock') as $o) {
+    foreach (array('devdcoun_settings', 'devdcoun_summary', 'devdcoun_db_meta', 'devdcoun_db_version', 'devdcoun_db_build_lock', 'devdcoun_dc_asns') as $o) {
         delete_option($o);
     }
-    foreach (array('devdcoun_summary_refresh', 'devdcoun_db_refresh') as $h) {
+    delete_transient('devdcoun_asn_down');
+    delete_transient('devdcoun_asn_budget');
+    global $wpdb;
+    $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", $wpdb->esc_like('_transient_devdcoun_asn_') . '%', $wpdb->esc_like('_transient_timeout_devdcoun_asn_') . '%')); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- uninstall sweep of the network cache
+    foreach (array('devdcoun_summary_refresh', 'devdcoun_db_refresh', 'devdcoun_dc_refresh') as $h) {
         wp_clear_scheduled_hook($h);
     }
 

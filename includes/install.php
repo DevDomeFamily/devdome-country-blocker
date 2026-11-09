@@ -43,6 +43,10 @@ function devdcoun_for_each_site($callback)
 
 function devdcoun_activate($network_wide = false)
 {
+    // First activation only: the next admin page load opens this plugin's screen (never network-wide, never WP-CLI).
+    if (empty($network_wide) && !(defined('WP_CLI') && WP_CLI)) {
+        set_transient('devdcoun_activation_redirect', 1, 60);
+    }
     if (is_multisite() && $network_wide) {
         devdcoun_for_each_site('devdcoun_activate_site');
         return;
@@ -172,6 +176,7 @@ function devdcoun_deactivate($network_wide = false)
     $clear = function () {
         wp_clear_scheduled_hook('devdcoun_summary_refresh');
         wp_clear_scheduled_hook('devdcoun_db_refresh');
+        wp_clear_scheduled_hook('devdcoun_dc_refresh');
     };
     if (is_multisite() && $network_wide) {
         devdcoun_for_each_site($clear);

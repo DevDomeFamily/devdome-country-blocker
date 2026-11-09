@@ -4,7 +4,7 @@ Tags: country blocker, geo blocking, geo blocker, geoip block, whitelist country
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.5
+Stable tag: 1.0.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -40,13 +40,21 @@ Your Connection on the Overview shows your country, detection source, installed 
 * Unknown countries are always allowed.
 * Add `define('DEVDCOUN_DISABLE', true);` to wp-config.php to switch all blocking off.
 
-= Optional Login and XML-RPC Blocking =
+= Optional Login, XML-RPC, REST API and admin-ajax.php Blocking =
 
-Apply your country rules to wp-login.php and xmlrpc.php with separate settings. Both are off by default. Always Allowed Addresses still applies. Logged-in and crawler exemptions do not apply to these endpoints.
+Apply your country rules to wp-login.php, xmlrpc.php, the REST API and admin-ajax.php with separate settings. All four are off by default. Always Allowed Addresses still applies. On the login page and xmlrpc.php the logged-in and crawler exemptions do not apply; REST API and admin-ajax.php requests are judged only when the visitor is not logged in, so the editor, apps that sign in and logged-in users keep working.
+
+= Block Addresses and Networks =
+
+Always Blocked Addresses blocks single addresses and ranges whatever their country, in every mode, even while country blocking is off. Blocked Networks does the same for whole networks by their number (ASN), and one switch blocks every known data-center, hosting and VPN network from the shared DevDome list. Network rules ask the DevDome geo service which network a new visitor address belongs to (see External services); nothing is sent while no network rule is on.
+
+= Push to Cloudflare =
+
+With a Cloudflare API token the plugin pushes your country rule to the zone's WAF as one custom rule, so blocked visitors are stopped at the edge, before the cache and before they reach your server. Nothing is sent until you press Push; Remove deletes that one rule again. Other rules in your zone are never touched.
 
 = Search Engines and Health Checks =
 
-One checkbox exempts Google, Bing, DuckDuckGo and Apple crawlers, plus the DevDome health monitor, from front-end blocking. It matches their user-agent strings.
+One checkbox exempts Google, Bing, DuckDuckGo and Apple crawlers, plus the DevDome health monitor, from front-end blocking. A crawler is exempt only when its user agent matches and its address is confirmed by reverse DNS (cached per address), so a visitor pretending to be Googlebot is still blocked.
 
 = Review Blocked Visits =
 
@@ -60,7 +68,7 @@ Use Refresh Now to recalculate the totals. Clear Statistics removes every counte
 
 Blocking applies only to requests that reach WordPress. A full-page cache or CDN can serve a cached page before the plugin runs.
 
-admin-ajax.php and REST API requests are not blocked. The user-agent exemption can be faked. On multisite, each site has separate settings, country lists and statistics, so set up each site separately.
+admin-ajax.php and REST API requests are blocked only when their switches are on, and only for visitors who are not logged in. An unknown network, like an unknown country, is always allowed. On multisite, each site has separate settings, country lists and statistics, so set up each site separately.
 
 = AI Agents and MCP =
 
@@ -82,7 +90,13 @@ This settings rule applies even in Test Mode. Changing only the message, redirec
 
 **Plugin catalog (`devdome.com`).** The DevDome Dashboard inside wp-admin fetches the list of DevDome plugins (names, descriptions, logos, links) from `https://devdome.com/wp-plugins/catalog.json` at most once every 12 hours (one hour after a failed fetch), so the list stays current. Only the bundled core version is sent in the request; no site or visitor data. Service provider: DevDome. Terms: https://devdome.com/terms-of-service Privacy policy: https://devdome.com/privacy-policy
 
-Country Blocker's own features (country detection, blocking, statistics) run entirely on your own server and make no network requests during a visit.
+**Network lookup (`api.devdome.com`), only while a network rule is on (Blocked Networks or Data Centers and VPNs).** For a visitor address not seen in the last 24 hours the plugin sends that one public address to `https://api.devdome.com/geo-resolve/classify` and receives its network number; the answer is cached for a day, at most 60 lookups a minute are made, a 2-second limit applies and when the service does not answer the visitor is let in. Nothing else about the site or the visitor is sent. With no network rule on, no address is ever sent.
+
+**Network list download (`api.devdome.com`), only while Data Centers and VPNs is on.** The shared list of data-center, hosting and VPN network numbers is downloaded from `https://api.devdome.com/bot-protection/asns` once when you turn the switch on and then once a day (a plain download, nothing about your site is sent); it is removed when you turn the switch off.
+
+**Cloudflare API (`api.cloudflare.com`), only when you press Push to Cloudflare or Remove from Cloudflare.** The plugin sends your Cloudflare API token, your site's host name (to find the zone) and the rule (your blocking mode, country codes and Always Allowed Addresses) to Cloudflare's API, and creates, updates or deletes the one WAF custom rule named DevDome Country Blocker. Cloudflare's terms: https://www.cloudflare.com/terms/ and privacy policy: https://www.cloudflare.com/privacypolicy/. DevDome's terms: https://devdome.com/terms/ and privacy policy: https://devdome.com/privacy/.
+
+Country detection, country blocking and statistics run entirely on your own server and make no network requests during a visit; the three services above are used only for the optional features that need them.
 
 The plugin bundles the shared DevDome suite library that powers the **DevDome Tools** dashboard. What that library may contact depends on the edition you are running; on the WordPress.org edition nothing is contacted before you act; the self-hosted edition also checks for updates as described below.
 
@@ -105,7 +119,7 @@ The DevDome Tools dashboard offers connecting a free DevDome account (used by ot
 * **Addresses are anonymized before storage.** The address field of the log keeps the first three numbers of an IPv4 address and the first 48 bits of an IPv6 address, never the full address. The requested path (without its query string) and the user agent of a blocked request are stored as sent.
 * **Retention is bounded.** About 200 logged hits are kept (trimmed as new hits arrive and exactly once a day); daily counters older than 13 months are removed automatically.
 * **You can delete everything.** "Clear Statistics" removes every counter and every logged hit on demand.
-* **No cookies** are set by this plugin and no visitor data leaves your site.
+* **No cookies** are set by this plugin. No visitor data leaves your site unless you turn a network rule on; then one public address per new visitor is looked up as described under External services.
 
 == Installation ==
 
@@ -148,7 +162,7 @@ Only when you enable their separate settings. Both are off by default. Allowed a
 
 = Does it block WooCommerce checkout or REST API calls? =
 
-A checkout page can be blocked like other front-end pages. REST API and admin-ajax.php requests are exempt. The plugin does not provide a separate WooCommerce checkout rule.
+A checkout page can be blocked like other front-end pages. REST API and admin-ajax.php requests are exempt unless you turn their switches on; even then only visitors who are not logged in are judged. The plugin does not provide a separate WooCommerce checkout rule.
 
 = Does it work on multisite? =
 
@@ -164,7 +178,11 @@ Choose your mode and countries, enable Test Mode and save. Review Recent Blocked
 
 = Does it block at the CDN edge? =
 
-No. It runs inside WordPress. Edge blocking needs a rule at your CDN or firewall.
+Inside WordPress by itself. On Cloudflare, press Push to Cloudflare in Settings with an API token: the plugin creates one WAF custom rule with your country list, and the block then happens at the edge, before the cache.
+
+= Can I block a single address or a whole network? =
+
+Yes. Always Blocked Addresses takes addresses and ranges; Blocked Networks takes network numbers (ASN); the Data Centers and VPNs switch blocks every known hosting and VPN network. All three work in every mode, and Always Allowed Addresses always wins.
 
 = What is removed on uninstall? =
 
@@ -178,6 +196,19 @@ Deleting the plugin removes its statistics tables, settings, cached summary, dat
 4. The 403 page: a plain page displaying your message to blocked visitors.
 
 == Changelog ==
+
+= 1.0.6 =
+
+* Shared DevDome library 1.7.17: the connect beacon's flood guard counts an IPv6 visitor per /64 network, and the one-click install of another DevDome plugin verifies the downloaded package against the published checksum before installing.
+* Two more switches under Blocking: the REST API and admin-ajax.php, each for visitors who are not logged in only, so the editor, apps that sign in and logged-in users keep working. Both off by default.
+* Always Blocked Addresses: addresses and ranges that are blocked whatever their country, in every mode. Always Allowed Addresses still wins; your own address on the list is refused when the login page is protected.
+* Networks: block by network number (ASN), and one switch for every known data-center, hosting and VPN network from the shared DevDome list. With a network rule on, a new visitor address is looked up once at the DevDome geo service and cached for a day; nothing is sent while no network rule is on.
+* Push to Cloudflare: with an API token the country rule becomes one WAF custom rule in your zone, blocking at the edge before the cache; Remove deletes it again. Nothing is sent until you press Push.
+* Hardening (security review): the statistics ability caps the visitor-chosen path at 200 characters and marks it as untrusted text for AI agents.
+* The first activation opens the plugin screen once: the DevDome Account card when the site is not connected yet, the Overview when it is. Bulk activations never redirect.
+* The search-engine bypass exempts a crawler only when its user agent matches and its address is confirmed by reverse DNS, cached per address, so a visitor pretending to be Googlebot is still blocked. The DevDome health monitor stays user-agent only.
+* The update-settings ability is marked as a change that cannot be undone, so an AI assistant connected through MCP asks before running it.
+* Shared DevDome library 1.7.16: the connect request to devdome.com stays valid for 60 minutes instead of 20, and the DevDome Tools page asks the server again while a request this site started is still open, so a connection authorized in a tab that never came back still completes; the Tools page notes when DevDome Analytics is not installed; the Analytics note styles are registered through WordPress instead of a style block in the page; one shared helper reads the visitor address behind a trusted proxy; the AI Assistant is listed in the plugin catalog. After connecting, the screen you land on says which account the site is connected to and the one next step.
 
 = 1.0.5 =
 
@@ -209,6 +240,9 @@ Plugin name and plugin links corrected.
 First release. Includes country block and allow lists, verified Cloudflare headers, a local IPv4 and IPv6 database with monthly refresh, trusted proxies, a custom 403 message or redirect, Test Mode, access safeguards, optional login and XML-RPC blocking, statistics, an anonymized hit log, 8 WordPress Abilities and the shared DevDome core 1.7.6 (DevDome Tools dashboard, optional account connection, Report this error).
 
 == Upgrade Notice ==
+
+= 1.0.6 =
+Search-engine bypass now checks reverse DNS, shared DevDome library 1.7.16.
 
 = 1.0.5 =
 Housekeeping release. Blocking and the screen are unchanged.

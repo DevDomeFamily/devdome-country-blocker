@@ -31,6 +31,13 @@ function devdcoun_defaults()
         'test_mode'      => 0,         // log who WOULD be blocked, block nobody
         'protect_login'  => 0,         // also enforce on wp-login.php (off by default: lockout safety)
         'protect_xmlrpc' => 0,         // also enforce on xmlrpc.php
+        'protect_rest'   => 0,         // 25 Oct 2026: also enforce on logged-out REST API requests
+        'protect_ajax'   => 0,         // 25 Oct 2026: also enforce on logged-out admin-ajax.php requests
+        'ip_denylist'    => array(),   // 25 Oct 2026: plain IPs + CIDR, always blocked (whatever the mode), after the allowlist
+        'block_asns'     => array(),   // 25 Oct 2026: network numbers (ASN) that are blocked whatever the country
+        'block_datacenter' => 0,       // 25 Oct 2026: block every network on the shared data-center / hosting / VPN list
+        'cf_token'       => '',        // 25 Oct 2026: Cloudflare API token for Push to Cloudflare (optional)
+        'cf_last'        => array(),   // 25 Oct 2026: the last push (zone, rule ids, expression, result)
     );
 }
 
@@ -98,12 +105,12 @@ function devdcoun_sanitize_settings(array $input, $current = null)
             $clean['redirect_url'] = '';
         }
     }
-    foreach (array('skip_logged_in', 'allow_search', 'trust_proxy', 'test_mode', 'protect_login', 'protect_xmlrpc') as $flag) {
+    foreach (array('skip_logged_in', 'allow_search', 'trust_proxy', 'test_mode', 'protect_login', 'protect_xmlrpc', 'protect_rest', 'protect_ajax', 'block_datacenter') as $flag) {
         if (array_key_exists($flag, $input)) {
             $clean[$flag] = (int) !empty($input[$flag]);
         }
     }
-    foreach (array('ip_allowlist', 'trusted_proxies') as $list_key) {
+    foreach (array('ip_allowlist', 'trusted_proxies', 'ip_denylist') as $list_key) {
         if (!isset($input[$list_key]) || !is_array($input[$list_key])) {
             continue;
         }
@@ -118,6 +125,17 @@ function devdcoun_sanitize_settings(array $input, $current = null)
             }
         }
         $clean[$list_key] = array_values(array_unique($list));
+    }
+    if (isset($input['block_asns']) && is_array($input['block_asns'])) {
+        $clean['block_asns'] = function_exists('devdcoun_clean_asns') ? devdcoun_clean_asns($input['block_asns']) : array();
+    }
+    if (isset($input['cf_token'])) {
+        // The token is kept as typed when it looks like one (letters, digits, - and _, up to 200 chars); anything else empties it.
+        $t = trim((string) $input['cf_token']);
+        $clean['cf_token'] = preg_match('/^[A-Za-z0-9_\-]{20,200}$/', $t) ? $t : '';
+    }
+    if (isset($input['cf_last']) && is_array($input['cf_last'])) {
+        $clean['cf_last'] = $input['cf_last'];
     }
     return $clean;
 }

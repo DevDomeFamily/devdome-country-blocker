@@ -331,8 +331,9 @@ function devdcorev1_hub_handle_connect_go()
         exit;
     }
     $rt = sanitize_key((string) $data['request_token']);
-    // 20 min, not 10: the server gives the request 10 min to be authorized and then a fresh
-    // 10 min for the claim, so a slow sign-in must not outlive the local correlation.
+    // 60 min (core 1.7.15, M049; was 20): the server now keeps the request 60 min to be authorized and
+    // then 60 min for the claim. A first-time owner signs up and verifies an email inside this window;
+    // a quarter of the live connect attempts died between the plugin and devdome.com, many past 20 min.
     // The browser comes back with the opaque request token only. Storing the starting user + a WP
     // nonce with it binds the completion to the session that pressed Connect (wp.org review
     // 2026-09-16); the remote nonce authenticates the server-to-server claim.
@@ -341,10 +342,12 @@ function devdcorev1_hub_handle_connect_go()
         'user_id'      => get_current_user_id(),
         'wp_nonce'     => wp_create_nonce('devdcorev1_connect_complete_' . $rt),
         'inventory'    => $inventory_yes ? 1 : 0, // bound to this request and this user; a parallel attempt cannot lend it (Codex 1.7.6 round 1)
-    ), 20 * MINUTE_IN_SECONDS);
+    ), 60 * MINUTE_IN_SECONDS);
     if ('' !== $return) {
-        set_transient('devdcorev1_connret_' . $rt, $return, 20 * MINUTE_IN_SECONDS);
+        set_transient('devdcorev1_connret_' . $rt, $return, 60 * MINUTE_IN_SECONDS);
     }
+    // The hub re-asks the server for this request while it is alive (devdcorev1_hub_maybe_poll_connect).
+    update_option('devdcorev1_connrt_last', array('rt' => $rt, 'user_id' => get_current_user_id(), 'at' => time()), false);
     $account_url = rtrim((string) apply_filters('devdcorev1_account_url', 'https://devdome.com'), '/');
     wp_redirect($account_url . '/connect/?' . http_build_query(array('rt' => $rt))); // phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- fixed first-party host, never user input.
     exit;
@@ -403,6 +406,13 @@ function devdcorev1_hub_maybe_complete_connect()
     $acct = ( !is_wp_error($resp) && 200 === (int) wp_remote_retrieve_response_code($resp) && is_array($data) && !empty($data['ok']) && !empty($data['account_id']) )
         ? strtoupper(sanitize_text_field((string) $data['account_id'])) : '';
     if (!preg_match('/^DD\d{8}$/', $acct)) {
+        // Core 1.7.15 (M049): the hub's own re-poll (dd_poll) asks before the owner has authorized on
+        // devdome.com; "no authorized connect request" (409) is then not an error. The page renders again
+        // and asks again later.
+        if (isset($_GET['dd_poll']) && !is_wp_error($resp) && 409 === (int) wp_remote_retrieve_response_code($resp)) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only flag; the rt correlation above is the guard
+            wp_safe_redirect($tools);
+            exit;
+        }
         // Say WHY (the hub renders dd_error + dd_why): transport error text, or the server's
         // HTTP code and error field. The user can press Connect again; nothing is lost locally.
         if (is_wp_error($resp)) {
@@ -466,6 +476,7 @@ function devdcorev1_hub_maybe_complete_connect()
     delete_transient('devdcorev1_connrt_' . $rt);
     delete_transient('devdcorev1_connret_' . $rt);
     delete_transient('devdcorev1_conn_checked');
+    delete_option('devdcorev1_connrt_last'); // nothing left to re-ask
     devdcorev1_connection_state(true); // fetch email + plan now so the UI shows them
     /**
      * The site just connected (core 1.7.1): plugins that keep their own "disconnected" markers lift them here
@@ -474,11 +485,100 @@ function devdcorev1_hub_maybe_complete_connect()
      * @param string $acct The account id (DD + 8 digits).
      */
     do_action('devdcorev1_connected', $acct);
-    // Back to the screen the user connected from (a plugin's own page), else the hub.
-    wp_safe_redirect((is_string($back) && '' !== $back) ? $back : $tools);
+    // Back to the screen the user connected from (a plugin's own page), else the hub. Core 1.7.16 (M116): the
+    // landing page shows the "Connected as" banner once (dd_connected, stripped by the banner's own script).
+    wp_safe_redirect(add_query_arg('dd_connected', '1', (is_string($back) && '' !== $back) ? $back : $tools));
     exit;
 }
 add_action('admin_init', 'devdcorev1_hub_maybe_complete_connect');
+
+/**
+ * Core 1.7.16 (M116): the connect return used to say nothing, the page simply rendered again. One flash on the
+ * screen the owner lands on (the plugin page they connected from, or the hub) names the account and ONE next step:
+ * install DevDome Analytics when it is not active, else open the devdome.com dashboard. The flag is dropped from
+ * the address and the banner fades after a few seconds (DESIGN.md 22). Nothing is stored; no literal script tag.
+ */
+function devdcorev1_connected_banner()
+{
+    if (empty($_GET['dd_connected']) || !current_user_can(devdcorev1_connect_cap())) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only flag from our own connect redirect
+        return;
+    }
+    $state = devdcorev1_connection_state();
+    if (empty($state['ok'])) {
+        return;
+    }
+    $an_file = 'devdome-analytics/devdome-analytics.php';
+    $active  = in_array($an_file, (array) get_option('active_plugins', array()), true)
+        || (is_multisite() && array_key_exists($an_file, (array) get_site_option('active_sitewide_plugins', array())));
+    if ($active) {
+        $url = 'https://devdome.com/account/';
+        $txt = 'Open your DevDome dashboard';
+        $ext = true;
+    } elseif (current_user_can('install_plugins')) {
+        $url = add_query_arg(array('s' => 'devdome-analytics', 'tab' => 'search', 'type' => 'term'), admin_url('plugin-install.php'));
+        $txt = 'Install DevDome Analytics';
+        $ext = false;
+    } else {
+        $url = 'https://wordpress.org/plugins/devdome-analytics/';
+        $txt = 'Get DevDome Analytics';
+        $ext = true;
+    }
+    $who = '' !== (string) $state['email'] ? (string) $state['email'] : (string) $state['account_id'];
+    $acct = '' !== (string) $state['email'] && '' !== (string) $state['account_id'] ? ' (' . (string) $state['account_id'] . ')' : '';
+    wp_register_script('devdcorev1-connected', false, array(), DEVDCOREV1_VERSION, true);
+    wp_enqueue_script('devdcorev1-connected');
+    wp_add_inline_script('devdcorev1-connected', "(function(){var n=document.querySelector('.devdcorev1-connected');if(!n){return;}if(window.history&&window.history.replaceState){try{var u=new URL(window.location.href);u.searchParams.delete('dd_connected');window.history.replaceState(null,'',u.toString());}catch(e){}}setTimeout(function(){n.style.transition='opacity .4s ease';n.style.opacity='0';setTimeout(function(){if(n.parentNode){n.parentNode.removeChild(n);}},450);},8000);})();");
+    ?>
+    <div class="devdcorev1-connected" role="status" style="margin:12px 20px 0 2px;padding:12px 16px;border:1px solid #a7f3d0;border-radius:10px;background:#ecfdf5;color:#065f46;font-size:13px;line-height:1.5;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <span style="flex:0 0 auto;width:28px;height:28px;border-radius:8px;background:#059669;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;">DD</span>
+        <span style="flex:1 1 auto;min-width:200px;"><strong style="font-weight:700;">Connected as <?php echo esc_html($who . $acct); ?>.</strong> <?php echo $active ? 'Every DevDome plugin on this site now reports to your account.' : 'Next step: DevDome Analytics shows your real visitors and the bots, free up to 50,000 pageviews a month.'; ?></span>
+        <a href="<?php echo esc_url($url); ?>"<?php echo $ext ? ' target="_blank" rel="noopener noreferrer"' : ''; ?> style="flex:0 0 auto;background:#059669;color:#fff;font-weight:700;font-size:13px;padding:8px 14px;border-radius:8px;text-decoration:none;white-space:nowrap;"><?php echo esc_html($txt); ?></a>
+    </div>
+    <?php
+}
+// in_admin_header, not admin_notices: Admin Cleaner's one-click "hide all notices" removes every admin_notices
+// callback on every screen (owner rule), and this banner is our own confirmation, not a notice.
+add_action('in_admin_header', 'devdcorev1_connected_banner');
+
+/**
+ * Core 1.7.15 (M049): the owner authorized on devdome.com but the browser never came back (tab closed,
+ * redirect lost): 3 of 51 live attempts ended that way, "authorized" on the server and nothing on the site.
+ * While a request THIS site started is still alive and the site is not connected, every open of the hub by
+ * the user who started it re-asks the server, at most once a minute, through the same callback (dd_poll), so
+ * the connect finishes without a fresh Connect. Reads only; the callback does the claim with its own guards.
+ */
+function devdcorev1_hub_maybe_poll_connect()
+{
+    $slug = defined('DEVDCOREV1_TOOLS_MENU_SLUG') ? DEVDCOREV1_TOOLS_MENU_SLUG : 'devdome-tools';
+    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only routing check; nothing is written from these values
+    if (!isset($_GET['page']) || !is_string($_GET['page']) || $slug !== sanitize_key(wp_unslash($_GET['page'])) || isset($_GET['dd_connect']) || isset($_GET['dd_error'])) {
+        return;
+    }
+    if (!current_user_can(devdcorev1_connect_cap())) {
+        return;
+    }
+    $last = get_option('devdcorev1_connrt_last', null);
+    if (!is_array($last) || empty($last['rt']) || !isset($last['user_id']) || (int) $last['user_id'] !== get_current_user_id()) {
+        return;
+    }
+    $state = get_option('devdcorev1_conn_state', array());
+    if (is_array($state) && !empty($state['ok'])) {
+        delete_option('devdcorev1_connrt_last');
+        return;
+    }
+    $rt = sanitize_key((string) $last['rt']);
+    if ('' === $rt || false === get_transient('devdcorev1_connrt_' . $rt)) {
+        delete_option('devdcorev1_connrt_last'); // the request expired: nothing left to finish
+        return;
+    }
+    if (false !== get_transient('devdcorev1_connpoll_' . $rt)) {
+        return; // asked within the last minute
+    }
+    set_transient('devdcorev1_connpoll_' . $rt, 1, MINUTE_IN_SECONDS);
+    wp_safe_redirect(add_query_arg(array('page' => $slug, 'dd_connect' => 1, 'rt' => $rt, 'dd_poll' => 1), admin_url('admin.php')));
+    exit;
+}
+add_action('admin_init', 'devdcorev1_hub_maybe_poll_connect', 9); // before the callback handler (priority 10)
 
 /**
  * Serve /.well-known/devdome-connect-proof.txt — the sha256 of THIS site's token. It lets the
